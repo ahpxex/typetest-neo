@@ -3,10 +3,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Textarea } from '@/components/ui/textarea'
+import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { calculateTypingMetrics } from '@/modules/typing-engine'
 import { formatDurationSeconds } from '@/lib/format'
+import { cn } from '@/lib/utils'
 
 type TypingTestClientProps = {
   attemptId: number
@@ -28,12 +30,15 @@ export function TypingTestClient({
   const router = useRouter()
   const startedAtMs = new Date(startedAt).getTime()
   const submitLockRef = useRef(false)
+  const hiddenInputRef = useRef<HTMLTextAreaElement | null>(null)
+  const activeCharRef = useRef<HTMLSpanElement | null>(null)
   const [typedText, setTypedText] = useState('')
   const [backspaceCount, setBackspaceCount] = useState(0)
   const [pasteCount, setPasteCount] = useState(0)
   const [nowMs, setNowMs] = useState(Date.now())
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
+  const [isFocused, setIsFocused] = useState(false)
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -57,6 +62,18 @@ export function TypingTestClient({
     window.localStorage.setItem(storageKey, typedText)
   }, [attemptId, typedText])
 
+  useEffect(() => {
+    hiddenInputRef.current?.focus()
+  }, [])
+
+  useEffect(() => {
+    activeCharRef.current?.scrollIntoView({
+      block: 'center',
+      inline: 'nearest',
+      behavior: 'smooth',
+    })
+  }, [typedText])
+
   const elapsedSeconds = Math.max(0, Math.min(durationSeconds, Math.floor((nowMs - startedAtMs) / 1000)))
   const remainingSeconds = Math.max(0, durationSeconds - elapsedSeconds)
 
@@ -69,6 +86,10 @@ export function TypingTestClient({
       }),
     [elapsedSeconds, referenceText, typedText],
   )
+
+  const referenceChars = useMemo(() => Array.from(referenceText), [referenceText])
+  const typedChars = useMemo(() => Array.from(typedText), [typedText])
+  const currentCharIndex = Math.min(typedChars.length, Math.max(referenceChars.length - 1, 0))
 
   const submitAttempt = useCallback(async () => {
     if (submitLockRef.current) {
@@ -123,50 +144,121 @@ export function TypingTestClient({
     }
   }, [remainingSeconds, submitAttempt])
 
+  function focusTypingArea() {
+    hiddenInputRef.current?.focus()
+  }
+
   return (
-    <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
-      <section className="space-y-4 rounded-3xl border border-border bg-card p-6 shadow-sm">
-        <header className="space-y-2 border-b border-border pb-4">
-          <p className="text-xs font-medium uppercase tracking-[0.24em] text-muted-foreground">Typing Test</p>
-          <h1 className="text-2xl font-semibold">{articleTitle}</h1>
-          <p className="text-sm text-muted-foreground">当前场次：{campaignName}</p>
-        </header>
-
-        <div className="rounded-2xl bg-muted/40 p-4 text-base leading-8 text-muted-foreground">
-          {referenceText}
+    <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_280px]">
+      <div className="space-y-5">
+        <div className="flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
+          <Badge variant="outline">{campaignName}</Badge>
+          <span>{articleTitle}</span>
+          <span>自动保存已开启</span>
         </div>
 
-        <label className="block space-y-2">
-          <span className="text-sm font-medium">请输入全文</span>
-          <Textarea
-            value={typedText}
-            onChange={(event) => setTypedText(event.target.value)}
-            onPaste={() => setPasteCount((value) => value + 1)}
-            onKeyDown={(event) => {
-              if (event.key === 'Backspace') {
-                setBackspaceCount((value) => value + 1)
-              }
-            }}
-            className="min-h-[280px] leading-7"
-            placeholder="从这里开始输入…"
-            spellCheck={false}
-            autoFocus
-          />
-        </label>
+        <Card className="border-none bg-transparent shadow-none">
+          <CardHeader className="px-0 pb-3">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-6 text-sm">
+                <div>
+                  <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">time</p>
+                  <p className="text-3xl font-semibold tracking-tight text-primary">{formatDurationSeconds(remainingSeconds)}</p>
+                </div>
+                <div>
+                  <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">kpm</p>
+                  <p className="text-xl font-semibold">{metrics.scoreKpm}</p>
+                </div>
+                <div>
+                  <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">accuracy</p>
+                  <p className="text-xl font-semibold">{metrics.accuracy}%</p>
+                </div>
+              </div>
+              <div className="flex gap-2">
+                <Button type="button" variant="outline" onClick={focusTypingArea}>聚焦输入</Button>
+                <Button type="button" onClick={() => void submitAttempt()} disabled={submitting}>{submitting ? '提交中…' : '提交成绩'}</Button>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent className="px-0">
+            <div
+              role="button"
+              tabIndex={0}
+              onClick={focusTypingArea}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault()
+                  focusTypingArea()
+                }
+              }}
+              className={cn(
+                'group relative min-h-[360px] cursor-text rounded-3xl border px-6 py-8 transition-colors md:px-8 md:py-10',
+                isFocused ? 'border-primary/40 bg-card shadow-sm' : 'border-border bg-card/70',
+              )}
+            >
+              <textarea
+                ref={hiddenInputRef}
+                value={typedText}
+                onChange={(event) => setTypedText(event.target.value)}
+                onFocus={() => setIsFocused(true)}
+                onBlur={() => setIsFocused(false)}
+                onPaste={() => setPasteCount((value) => value + 1)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Backspace') {
+                    setBackspaceCount((value) => value + 1)
+                  }
+                }}
+                className="pointer-events-none absolute inset-0 h-full w-full resize-none opacity-0"
+                spellCheck={false}
+                autoCapitalize="off"
+                autoCorrect="off"
+              />
 
-        {error ? <div className="text-sm text-destructive">{error}</div> : null}
+              {!isFocused && typedText.length === 0 ? (
+                <div className="pointer-events-none absolute inset-x-0 top-6 flex justify-center">
+                  <div className="rounded-full border border-border bg-background/90 px-3 py-1 text-xs text-muted-foreground shadow-sm">
+                    点击文本区域开始输入
+                  </div>
+                </div>
+              ) : null}
 
-        <div className="flex flex-wrap gap-3">
-          <Button type="button" onClick={() => void submitAttempt()} disabled={submitting}>
-            {submitting ? '提交中…' : '提交成绩'}
-          </Button>
-          <div className="rounded-xl border border-border px-4 py-2 text-sm text-muted-foreground">自动保存到本地草稿</div>
-        </div>
-      </section>
+              <div className="max-h-[420px] overflow-auto pr-2 text-[1.6rem] leading-[1.9] tracking-[0.01em] md:text-[2rem] md:leading-[1.7]">
+                {referenceChars.map((character, index) => {
+                  const typedCharacter = typedChars[index]
+                  const hasTyped = typedCharacter !== undefined
+                  const isActive = index === currentCharIndex
+                  const isCorrect = hasTyped && typedCharacter === character
+                  const isIncorrect = hasTyped && typedCharacter !== character
 
-      <aside className="space-y-4 rounded-3xl border border-border bg-card p-6 shadow-sm">
+                  return (
+                    <span
+                      key={`${index}-${character}`}
+                      ref={isActive ? activeCharRef : null}
+                      className={cn(
+                        'relative rounded-[4px] transition-colors',
+                        !hasTyped && 'text-zinc-400/55',
+                        isCorrect && 'text-foreground',
+                        isIncorrect && 'bg-destructive/15 text-destructive',
+                        isActive && 'bg-primary/12 text-foreground before:absolute before:bottom-0 before:left-0 before:h-[2px] before:w-full before:rounded-full before:bg-primary',
+                        character === ' ' && 'mr-[0.18em]',
+                        character === '\n' && 'block h-4 w-full',
+                      )}
+                    >
+                      {character === ' ' ? '\u00A0' : character === '\n' ? '' : character}
+                    </span>
+                  )
+                })}
+              </div>
+            </div>
+
+            {error ? <p className="mt-3 text-sm text-destructive">{error}</p> : null}
+          </CardContent>
+        </Card>
+      </div>
+
+      <aside className="space-y-4 rounded-3xl border border-border bg-card p-5 shadow-sm xl:sticky xl:top-24 xl:h-fit">
         <h2 className="text-lg font-semibold">实时统计</h2>
-        <dl className="grid grid-cols-2 gap-3 text-sm">
+        <dl className="grid grid-cols-2 gap-3 text-sm xl:grid-cols-1">
           <StatCard label="剩余时间" value={formatDurationSeconds(remainingSeconds)} highlight />
           <StatCard label="当前速度" value={`${metrics.scoreKpm} KPM`} />
           <StatCard label="正确率" value={`${metrics.accuracy}%`} />
@@ -185,8 +277,8 @@ export function TypingTestClient({
 
 function StatCard({ label, value, highlight = false }: { label: string; value: string; highlight?: boolean }) {
   return (
-    <div className={`rounded-2xl border px-4 py-3 ${highlight ? 'border-primary bg-primary text-primary-foreground' : 'border-border bg-muted/40'}`}>
-      <dt className={`text-xs ${highlight ? 'text-primary-foreground/80' : 'text-muted-foreground'}`}>{label}</dt>
+    <div className={cn('rounded-2xl border px-4 py-3', highlight ? 'border-primary/30 bg-primary/8 text-foreground' : 'border-border bg-muted/30')}>
+      <dt className="text-xs uppercase tracking-[0.16em] text-muted-foreground">{label}</dt>
       <dd className="mt-2 text-lg font-semibold">{value}</dd>
     </div>
   )
