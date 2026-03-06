@@ -1,19 +1,21 @@
-'use client';
+'use client'
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useRouter } from 'next/navigation'
 
-import { calculateTypingMetrics } from '@/modules/typing-engine';
-import { formatDurationSeconds } from '@/lib/format';
+import { Button } from '@/components/ui/button'
+import { Textarea } from '@/components/ui/textarea'
+import { calculateTypingMetrics } from '@/modules/typing-engine'
+import { formatDurationSeconds } from '@/lib/format'
 
 type TypingTestClientProps = {
-  attemptId: number;
-  articleTitle: string;
-  campaignName: string;
-  referenceText: string;
-  durationSeconds: number;
-  startedAt: string;
-};
+  attemptId: number
+  articleTitle: string
+  campaignName: string
+  referenceText: string
+  durationSeconds: number
+  startedAt: string
+}
 
 export function TypingTestClient({
   attemptId,
@@ -23,40 +25,40 @@ export function TypingTestClient({
   durationSeconds,
   startedAt,
 }: TypingTestClientProps) {
-  const router = useRouter();
-  const startedAtMs = new Date(startedAt).getTime();
-  const submitLockRef = useRef(false);
-  const [typedText, setTypedText] = useState('');
-  const [backspaceCount, setBackspaceCount] = useState(0);
-  const [pasteCount, setPasteCount] = useState(0);
-  const [nowMs, setNowMs] = useState(Date.now());
-  const [error, setError] = useState<string | null>(null);
-  const [submitting, setSubmitting] = useState(false);
+  const router = useRouter()
+  const startedAtMs = new Date(startedAt).getTime()
+  const submitLockRef = useRef(false)
+  const [typedText, setTypedText] = useState('')
+  const [backspaceCount, setBackspaceCount] = useState(0)
+  const [pasteCount, setPasteCount] = useState(0)
+  const [nowMs, setNowMs] = useState(Date.now())
+  const [error, setError] = useState<string | null>(null)
+  const [submitting, setSubmitting] = useState(false)
 
   useEffect(() => {
     const timer = window.setInterval(() => {
-      setNowMs(Date.now());
-    }, 250);
+      setNowMs(Date.now())
+    }, 250)
 
-    return () => window.clearInterval(timer);
-  }, []);
+    return () => window.clearInterval(timer)
+  }, [])
 
   useEffect(() => {
-    const storageKey = `typing-attempt-${attemptId}`;
-    const saved = window.localStorage.getItem(storageKey);
+    const storageKey = `typing-attempt-${attemptId}`
+    const saved = window.localStorage.getItem(storageKey)
 
     if (saved) {
-      setTypedText(saved);
+      setTypedText(saved)
     }
-  }, [attemptId]);
+  }, [attemptId])
 
   useEffect(() => {
-    const storageKey = `typing-attempt-${attemptId}`;
-    window.localStorage.setItem(storageKey, typedText);
-  }, [attemptId, typedText]);
+    const storageKey = `typing-attempt-${attemptId}`
+    window.localStorage.setItem(storageKey, typedText)
+  }, [attemptId, typedText])
 
-  const elapsedSeconds = Math.max(0, Math.min(durationSeconds, Math.floor((nowMs - startedAtMs) / 1000)));
-  const remainingSeconds = Math.max(0, durationSeconds - elapsedSeconds);
+  const elapsedSeconds = Math.max(0, Math.min(durationSeconds, Math.floor((nowMs - startedAtMs) / 1000)))
+  const remainingSeconds = Math.max(0, durationSeconds - elapsedSeconds)
 
   const metrics = useMemo(
     () =>
@@ -66,16 +68,16 @@ export function TypingTestClient({
         durationSeconds: Math.max(elapsedSeconds, 1),
       }),
     [elapsedSeconds, referenceText, typedText],
-  );
+  )
 
   const submitAttempt = useCallback(async () => {
     if (submitLockRef.current) {
-      return;
+      return
     }
 
-    submitLockRef.current = true;
-    setSubmitting(true);
-    setError(null);
+    submitLockRef.current = true
+    setSubmitting(true)
+    setError(null)
 
     try {
       const response = await fetch(`/api/attempts/${attemptId}/submit`, {
@@ -97,80 +99,73 @@ export function TypingTestClient({
             },
           },
         }),
-      });
+      })
 
-      const payload = (await response.json()) as { error?: string; redirectTo?: string };
+      const payload = (await response.json()) as { error?: string; redirectTo?: string }
 
       if (!response.ok || !payload.redirectTo) {
-        throw new Error(payload.error ?? '成绩提交失败');
+        throw new Error(payload.error ?? '成绩提交失败')
       }
 
-      window.localStorage.removeItem(`typing-attempt-${attemptId}`);
-      router.push(payload.redirectTo);
-      router.refresh();
+      window.localStorage.removeItem(`typing-attempt-${attemptId}`)
+      router.push(payload.redirectTo)
+      router.refresh()
     } catch (submitError) {
-      submitLockRef.current = false;
-      setSubmitting(false);
-      setError(submitError instanceof Error ? submitError.message : '成绩提交失败');
+      submitLockRef.current = false
+      setSubmitting(false)
+      setError(submitError instanceof Error ? submitError.message : '成绩提交失败')
     }
-  }, [attemptId, backspaceCount, elapsedSeconds, pasteCount, router, typedText]);
+  }, [attemptId, backspaceCount, elapsedSeconds, pasteCount, router, typedText])
 
   useEffect(() => {
     if (remainingSeconds === 0 && !submitLockRef.current) {
-      void submitAttempt();
+      void submitAttempt()
     }
-  }, [remainingSeconds, submitAttempt]);
+  }, [remainingSeconds, submitAttempt])
 
   return (
     <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
-      <section className="space-y-4 rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm">
-        <header className="space-y-2 border-b border-zinc-100 pb-4">
-          <p className="text-xs font-medium uppercase tracking-[0.24em] text-zinc-400">Typing Test</p>
-          <h1 className="text-2xl font-semibold text-zinc-950">{articleTitle}</h1>
-          <p className="text-sm text-zinc-500">当前场次：{campaignName}</p>
+      <section className="space-y-4 rounded-3xl border border-border bg-card p-6 shadow-sm">
+        <header className="space-y-2 border-b border-border pb-4">
+          <p className="text-xs font-medium uppercase tracking-[0.24em] text-muted-foreground">Typing Test</p>
+          <h1 className="text-2xl font-semibold">{articleTitle}</h1>
+          <p className="text-sm text-muted-foreground">当前场次：{campaignName}</p>
         </header>
 
-        <div className="rounded-2xl bg-zinc-50 p-4 text-base leading-8 text-zinc-700">
+        <div className="rounded-2xl bg-muted/40 p-4 text-base leading-8 text-muted-foreground">
           {referenceText}
         </div>
 
         <label className="block space-y-2">
-          <span className="text-sm font-medium text-zinc-700">请输入全文</span>
-          <textarea
+          <span className="text-sm font-medium">请输入全文</span>
+          <Textarea
             value={typedText}
             onChange={(event) => setTypedText(event.target.value)}
             onPaste={() => setPasteCount((value) => value + 1)}
             onKeyDown={(event) => {
               if (event.key === 'Backspace') {
-                setBackspaceCount((value) => value + 1);
+                setBackspaceCount((value) => value + 1)
               }
             }}
-            className="min-h-[280px] w-full rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-sm leading-7 text-zinc-900 outline-none transition focus:border-zinc-900"
+            className="min-h-[280px] leading-7"
             placeholder="从这里开始输入…"
             spellCheck={false}
             autoFocus
           />
         </label>
 
-        {error ? <div className="text-sm text-rose-600">{error}</div> : null}
+        {error ? <div className="text-sm text-destructive">{error}</div> : null}
 
         <div className="flex flex-wrap gap-3">
-          <button
-            type="button"
-            onClick={() => void submitAttempt()}
-            disabled={submitting}
-            className="rounded-xl bg-zinc-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-zinc-700 disabled:cursor-not-allowed disabled:opacity-60"
-          >
+          <Button type="button" onClick={() => void submitAttempt()} disabled={submitting}>
             {submitting ? '提交中…' : '提交成绩'}
-          </button>
-          <div className="rounded-xl border border-zinc-200 px-4 py-2 text-sm text-zinc-500">
-            自动保存到本地草稿
-          </div>
+          </Button>
+          <div className="rounded-xl border border-border px-4 py-2 text-sm text-muted-foreground">自动保存到本地草稿</div>
         </div>
       </section>
 
-      <aside className="space-y-4 rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm">
-        <h2 className="text-lg font-semibold text-zinc-950">实时统计</h2>
+      <aside className="space-y-4 rounded-3xl border border-border bg-card p-6 shadow-sm">
+        <h2 className="text-lg font-semibold">实时统计</h2>
         <dl className="grid grid-cols-2 gap-3 text-sm">
           <StatCard label="剩余时间" value={formatDurationSeconds(remainingSeconds)} highlight />
           <StatCard label="当前速度" value={`${metrics.scoreKpm} KPM`} />
@@ -185,22 +180,14 @@ export function TypingTestClient({
         </dl>
       </aside>
     </div>
-  );
+  )
 }
 
-function StatCard({
-  label,
-  value,
-  highlight = false,
-}: {
-  label: string;
-  value: string;
-  highlight?: boolean;
-}) {
+function StatCard({ label, value, highlight = false }: { label: string; value: string; highlight?: boolean }) {
   return (
-    <div className={`rounded-2xl border px-4 py-3 ${highlight ? 'border-zinc-900 bg-zinc-900 text-white' : 'border-zinc-200 bg-zinc-50 text-zinc-900'}`}>
-      <dt className={`text-xs ${highlight ? 'text-zinc-300' : 'text-zinc-500'}`}>{label}</dt>
+    <div className={`rounded-2xl border px-4 py-3 ${highlight ? 'border-primary bg-primary text-primary-foreground' : 'border-border bg-muted/40'}`}>
+      <dt className={`text-xs ${highlight ? 'text-primary-foreground/80' : 'text-muted-foreground'}`}>{label}</dt>
       <dd className="mt-2 text-lg font-semibold">{value}</dd>
     </div>
-  );
+  )
 }

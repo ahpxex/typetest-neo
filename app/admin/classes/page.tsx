@@ -1,76 +1,77 @@
-import { Card } from '@/components/ui/card';
-import { NoticeBanner } from '@/components/ui/notice-banner';
-import { SubmitButton } from '@/components/ui/submit-button';
-import { createClassGroupAction } from '@/features/admin/actions';
-import { getClassGroupsList } from '@/lib/data/queries';
-import { formatDateTime } from '@/lib/format';
-import { AppSearchParams, getSearchParamValue } from '@/lib/search-params';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { createClassGroupAction } from '@/features/admin/actions'
+import { getClassGroupsList } from '@/lib/data/queries'
+import { formatDateTime } from '@/lib/format'
+import { AppSearchParams, getSearchParamValue } from '@/lib/search-params'
 
 export default async function AdminClassesPage({ searchParams }: { searchParams?: AppSearchParams }) {
-  const params = (await searchParams) ?? {};
-  const success = getSearchParamValue(params.success);
-  const error = getSearchParamValue(params.error);
-  const classGroups = await getClassGroupsList();
+  const params = (await searchParams) ?? {}
+  const success = getSearchParamValue(params.success)
+  const error = getSearchParamValue(params.error)
+  const classGroups = await getClassGroupsList()
 
   return (
     <div className="space-y-6">
       <header>
-        <h1 className="text-3xl font-semibold tracking-tight text-zinc-950">班级管理</h1>
-        <p className="mt-2 text-sm text-zinc-500">维护年级、专业和班级编码，供学生归档与排行榜使用。</p>
+        <h1 className="text-3xl font-semibold tracking-tight">班级管理</h1>
+        <p className="mt-2 text-sm text-muted-foreground">维护年级、专业和班级编码，供学生归档与排行榜使用。</p>
       </header>
 
-      <NoticeBanner message={success} tone="success" />
-      <NoticeBanner message={error} tone="error" />
+      {success ? <Alert><AlertTitle>操作成功</AlertTitle><AlertDescription>{success}</AlertDescription></Alert> : null}
+      {error ? <Alert variant="destructive"><AlertTitle>操作失败</AlertTitle><AlertDescription>{error}</AlertDescription></Alert> : null}
 
       <div className="grid gap-6 xl:grid-cols-[380px_minmax(0,1fr)]">
-        <Card title="新建班级">
-          <form action={createClassGroupAction} className="space-y-4">
-            <input type="hidden" name="redirectTo" value="/admin/classes" />
-            <Field label="班级编码" name="code" placeholder="例如 2026-CS-01" />
-            <Field label="班级名称" name="name" placeholder="例如 2026 计算机 1 班" />
-            <Field label="年级" name="gradeYear" placeholder="2026" type="number" />
-            <Field label="学院/部门" name="department" placeholder="请输入学院" />
-            <Field label="专业" name="major" placeholder="请输入专业" />
-            <SubmitButton className="w-full">保存班级</SubmitButton>
-          </form>
+        <Card>
+          <CardHeader><CardTitle>新建班级</CardTitle></CardHeader>
+          <CardContent>
+            <form action={createClassGroupAction} className="space-y-4">
+              <input type="hidden" name="redirectTo" value="/admin/classes" />
+              <div className="space-y-2"><Label htmlFor="code">班级编码</Label><Input id="code" name="code" placeholder="例如 2026-CS-01" required /></div>
+              <div className="space-y-2"><Label htmlFor="name">班级名称</Label><Input id="name" name="name" placeholder="例如 2026 计算机 1 班" required /></div>
+              <div className="space-y-2"><Label htmlFor="gradeYear">年级</Label><Input id="gradeYear" name="gradeYear" type="number" placeholder="2026" required /></div>
+              <div className="space-y-2"><Label htmlFor="department">学院 / 部门</Label><Input id="department" name="department" placeholder="请输入学院" required /></div>
+              <div className="space-y-2"><Label htmlFor="major">专业</Label><Input id="major" name="major" placeholder="请输入专业" required /></div>
+              <Button type="submit" className="w-full">保存班级</Button>
+            </form>
+          </CardContent>
         </Card>
 
-        <Card title="班级列表" description={`共 ${classGroups.length} 个班级`}>
-          <div className="overflow-x-auto">
-            <table className="min-w-full text-left text-sm">
-              <thead className="text-zinc-500">
-                <tr>
-                  <th className="pb-3">编码</th>
-                  <th className="pb-3">名称</th>
-                  <th className="pb-3">专业</th>
-                  <th className="pb-3">人数</th>
-                  <th className="pb-3">更新时间</th>
-                </tr>
-              </thead>
-              <tbody>
+        <Card>
+          <CardHeader>
+            <CardTitle>班级列表</CardTitle>
+            <CardDescription>共 {classGroups.length} 个班级</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>编码</TableHead>
+                  <TableHead>名称</TableHead>
+                  <TableHead>专业</TableHead>
+                  <TableHead>人数</TableHead>
+                  <TableHead>更新时间</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
                 {classGroups.map((group) => (
-                  <tr key={group.id} className="border-t border-zinc-100">
-                    <td className="py-3 font-medium text-zinc-950">{group.code}</td>
-                    <td className="py-3">{group.name}</td>
-                    <td className="py-3">{group.department} / {group.major}</td>
-                    <td className="py-3">{group.studentCount}</td>
-                    <td className="py-3">{formatDateTime(group.updatedAt)}</td>
-                  </tr>
+                  <TableRow key={group.id}>
+                    <TableCell className="font-medium">{group.code}</TableCell>
+                    <TableCell>{group.name}</TableCell>
+                    <TableCell>{group.department} / {group.major}</TableCell>
+                    <TableCell>{group.studentCount}</TableCell>
+                    <TableCell>{formatDateTime(group.updatedAt)}</TableCell>
+                  </TableRow>
                 ))}
-              </tbody>
-            </table>
-          </div>
+              </TableBody>
+            </Table>
+          </CardContent>
         </Card>
       </div>
     </div>
-  );
-}
-
-function Field({ label, name, placeholder, type = 'text' }: { label: string; name: string; placeholder: string; type?: string }) {
-  return (
-    <label className="block space-y-2 text-sm font-medium text-zinc-700">
-      <span>{label}</span>
-      <input name={name} type={type} placeholder={placeholder} className="w-full rounded-xl border border-zinc-200 px-3 py-2 outline-none transition focus:border-zinc-900" required />
-    </label>
-  );
+  )
 }

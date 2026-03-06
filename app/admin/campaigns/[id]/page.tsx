@@ -1,173 +1,122 @@
-import { notFound } from 'next/navigation';
+import { notFound } from 'next/navigation'
 
-import { Badge } from '@/components/ui/badge';
-import { Card } from '@/components/ui/card';
-import { NoticeBanner } from '@/components/ui/notice-banner';
-import { SubmitButton } from '@/components/ui/submit-button';
-import { saveCampaignAction, setCurrentArticleAction } from '@/features/admin/actions';
-import {
-  getArticlesList,
-  getCampaignArticleAssignments,
-  getCampaignById,
-  getLatestCampaignCurrentArticle,
-  getLeaderboard,
-} from '@/lib/data/queries';
-import { formatDateTime, formatDurationSeconds, formatKpm, formatPercent } from '@/lib/format';
-import { AppSearchParams, getSearchParamValue } from '@/lib/search-params';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Checkbox } from '@/components/ui/checkbox'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { saveCampaignAction, setCurrentArticleAction } from '@/features/admin/actions'
+import { getArticlesList, getLatestCampaignCurrentArticle, getCampaignById, getLeaderboard } from '@/lib/data/queries'
+import { formatDateTime, formatDurationSeconds, formatKpm, formatPercent } from '@/lib/format'
+import { AppSearchParams, getSearchParamValue } from '@/lib/search-params'
 
-export default async function CampaignDetailPage({
-  params,
-  searchParams,
-}: {
-  params: Promise<{ id: string }>;
-  searchParams?: AppSearchParams;
-}) {
-  const [{ id }, resolvedSearchParams] = await Promise.all([params, searchParams]);
-  const campaignId = Number(id);
-  const [campaign, articles, articleAssignments, currentArticle, leaderboard] = await Promise.all([
+export default async function CampaignDetailPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams?: AppSearchParams }) {
+  const [{ id }, resolvedSearchParams] = await Promise.all([params, searchParams])
+  const campaignId = Number(id)
+  const [campaign, articles, currentArticle, leaderboard] = await Promise.all([
     getCampaignById(campaignId),
     getArticlesList(),
-    getCampaignArticleAssignments(campaignId),
     getLatestCampaignCurrentArticle(campaignId),
     getLeaderboard(campaignId),
-  ]);
+  ])
 
-  if (!campaign) {
-    notFound();
-  }
+  if (!campaign) notFound()
 
-  const success = getSearchParamValue(resolvedSearchParams?.success);
-  const error = getSearchParamValue(resolvedSearchParams?.error);
-  const selectedArticleIds = new Set(articleAssignments.map((item) => item.articleId));
+  const success = getSearchParamValue(resolvedSearchParams?.success)
+  const error = getSearchParamValue(resolvedSearchParams?.error)
 
   return (
     <div className="space-y-6">
       <header className="space-y-3">
         <div className="flex flex-wrap items-center gap-3">
-          <h1 className="text-3xl font-semibold tracking-tight text-zinc-950">{campaign.name}</h1>
-          <Badge tone={campaign.status === 'active' ? 'success' : campaign.status === 'draft' ? 'warning' : 'default'}>{campaign.status}</Badge>
+          <h1 className="text-3xl font-semibold tracking-tight">{campaign.name}</h1>
+          <Badge variant={campaign.status === 'active' ? 'secondary' : campaign.status === 'draft' ? 'outline' : 'default'}>{campaign.status}</Badge>
         </div>
-        <p className="text-sm text-zinc-500">{campaign.academicYear} / {campaign.term} · {campaign.mode} · {formatDurationSeconds(campaign.durationSeconds)}</p>
+        <p className="text-sm text-muted-foreground">{campaign.academicYear} / {campaign.term} · {campaign.mode} · {formatDurationSeconds(campaign.durationSeconds)}</p>
       </header>
 
-      <NoticeBanner message={success} tone="success" />
-      <NoticeBanner message={error} tone="error" />
+      {success ? <Alert><AlertTitle>操作成功</AlertTitle><AlertDescription>{success}</AlertDescription></Alert> : null}
+      {error ? <Alert variant="destructive"><AlertTitle>操作失败</AlertTitle><AlertDescription>{error}</AlertDescription></Alert> : null}
 
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
-        <Card title="编辑场次">
-          <form action={saveCampaignAction} className="space-y-5">
-            <input type="hidden" name="id" value={campaign.id} />
-            <input type="hidden" name="redirectTo" value={`/admin/campaigns/${campaign.id}`} />
-            <div className="grid gap-4 md:grid-cols-2">
-              <Field label="场次名称" name="name" defaultValue={campaign.name} placeholder="请输入场次名称" />
-              <Field label="学年" name="academicYear" defaultValue={campaign.academicYear} placeholder="例如 2025-2026" />
-            </div>
-            <div className="grid gap-4 md:grid-cols-3">
-              <Field label="学期" name="term" defaultValue={campaign.term} placeholder="例如 fall" />
-              <SelectField label="模式" name="mode" defaultValue={campaign.mode} options={[['exam', '考试'], ['practice', '练习']]} />
-              <SelectField label="状态" name="status" defaultValue={campaign.status} options={[['draft', '草稿'], ['scheduled', '待开放'], ['active', '激活'], ['closed', '关闭'], ['archived', '归档']]} />
-            </div>
-            <div className="grid gap-4 md:grid-cols-3">
-              <Field label="时长（秒）" name="durationSeconds" type="number" defaultValue={campaign.durationSeconds} placeholder="180" />
-              <Field label="最大尝试次数" name="maxAttemptsPerStudent" type="number" defaultValue={campaign.maxAttemptsPerStudent} placeholder="1" />
-              <SelectField label="排行榜可见性" name="rankingVisibility" defaultValue={campaign.rankingVisibility} options={[['public', '公开'], ['class_only', '仅班级'], ['hidden', '隐藏']]} />
-            </div>
-            <div className="grid gap-4 md:grid-cols-3">
-              <SelectField label="出题策略" name="articleStrategy" defaultValue={campaign.articleStrategy} options={[['fixed', '固定文章'], ['daily_random', '每日随机'], ['shuffle_once', '随机锁定']]} />
-              <Field label="开始时间" name="startAt" type="datetime-local" defaultValue={campaign.startAt ? toDateTimeLocal(campaign.startAt) : ''} placeholder="" />
-              <Field label="结束时间" name="endAt" type="datetime-local" defaultValue={campaign.endAt ? toDateTimeLocal(campaign.endAt) : ''} placeholder="" />
-            </div>
-            <label className="flex items-center gap-3 rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-3 text-sm text-zinc-700">
-              <input type="checkbox" name="allowRetry" defaultChecked={campaign.allowRetry} className="size-4 rounded border-zinc-300" />
-              允许学生重复测试
-            </label>
-            <div className="space-y-3 rounded-2xl border border-zinc-200 p-4">
-              <div>
-                <h2 className="font-semibold text-zinc-950">绑定文章</h2>
-                <p className="text-sm text-zinc-500">此场次可使用的文章集合。</p>
+        <Card>
+          <CardHeader><CardTitle>编辑场次</CardTitle></CardHeader>
+          <CardContent>
+            <form action={saveCampaignAction} className="space-y-5">
+              <input type="hidden" name="id" value={campaign.id} />
+              <input type="hidden" name="redirectTo" value={`/admin/campaigns/${campaign.id}`} />
+              <input type="hidden" name="articleStrategy" value="fixed" />
+              <div className="grid gap-4 md:grid-cols-2">
+                <div className="space-y-2"><Label htmlFor="name">场次名称</Label><Input id="name" name="name" defaultValue={campaign.name} required /></div>
+                <div className="space-y-2"><Label htmlFor="academicYear">学年</Label><Input id="academicYear" name="academicYear" defaultValue={campaign.academicYear} required /></div>
               </div>
-              <div className="grid gap-3 md:grid-cols-2">
-                {articles.map((article) => (
-                  <label key={article.id} className="flex items-start gap-3 rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-3 text-sm text-zinc-700">
-                    <input type="checkbox" name="articleIds" value={article.id} defaultChecked={selectedArticleIds.has(article.id)} className="mt-1 size-4 rounded border-zinc-300" />
-                    <span>
-                      <span className="block font-medium text-zinc-950">{article.title}</span>
-                      <span className="text-xs text-zinc-400">{article.language} · {article.status}</span>
-                    </span>
-                  </label>
-                ))}
+              <div className="grid gap-4 md:grid-cols-3">
+                <div className="space-y-2"><Label htmlFor="term">学期</Label><Input id="term" name="term" defaultValue={campaign.term} required /></div>
+                <div className="space-y-2"><Label htmlFor="mode">模式</Label><Select name="mode" defaultValue={campaign.mode}><SelectTrigger id="mode" className="w-full"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="exam">考试</SelectItem><SelectItem value="practice">练习</SelectItem></SelectContent></Select></div>
+                <div className="space-y-2"><Label htmlFor="status">状态</Label><Select name="status" defaultValue={campaign.status}><SelectTrigger id="status" className="w-full"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="draft">草稿</SelectItem><SelectItem value="scheduled">待开放</SelectItem><SelectItem value="active">激活</SelectItem><SelectItem value="closed">关闭</SelectItem><SelectItem value="archived">归档</SelectItem></SelectContent></Select></div>
               </div>
-            </div>
-            <label className="block space-y-2 text-sm font-medium text-zinc-700">
-              <span>当前文章（保存时可同时更新）</span>
-              <select name="currentArticleId" defaultValue={currentArticle?.articleId ?? ''} className="w-full rounded-xl border border-zinc-200 px-3 py-2 outline-none transition focus:border-zinc-900">
-                <option value="">按策略自动决定</option>
-                {articleAssignments.map((article) => <option key={article.articleId} value={article.articleId}>{article.title}</option>)}
-              </select>
-            </label>
-            <SubmitButton>保存场次</SubmitButton>
-          </form>
+              <div className="grid gap-4 md:grid-cols-3">
+                <div className="space-y-2"><Label htmlFor="durationSeconds">时长（秒）</Label><Input id="durationSeconds" name="durationSeconds" type="number" defaultValue={campaign.durationSeconds} required /></div>
+                <div className="space-y-2"><Label htmlFor="maxAttemptsPerStudent">最大尝试次数</Label><Input id="maxAttemptsPerStudent" name="maxAttemptsPerStudent" type="number" defaultValue={campaign.maxAttemptsPerStudent} required /></div>
+                <div className="space-y-2"><Label htmlFor="rankingVisibility">排行榜可见性</Label><Select name="rankingVisibility" defaultValue={campaign.rankingVisibility}><SelectTrigger id="rankingVisibility" className="w-full"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="public">公开</SelectItem><SelectItem value="class_only">仅班级</SelectItem><SelectItem value="hidden">隐藏</SelectItem></SelectContent></Select></div>
+              </div>
+              <div className="grid gap-4 md:grid-cols-2">
+                <div className="space-y-2"><Label htmlFor="startAt">开始时间</Label><Input id="startAt" name="startAt" type="datetime-local" defaultValue={campaign.startAt ? toDateTimeLocal(campaign.startAt) : ''} /></div>
+                <div className="space-y-2"><Label htmlFor="endAt">结束时间</Label><Input id="endAt" name="endAt" type="datetime-local" defaultValue={campaign.endAt ? toDateTimeLocal(campaign.endAt) : ''} /></div>
+              </div>
+              <label htmlFor="allowRetry" className="flex items-center gap-3 rounded-xl border border-border bg-muted/40 px-4 py-3 text-sm"><Checkbox id="allowRetry" name="allowRetry" defaultChecked={campaign.allowRetry} />允许学生重复测试</label>
+              <div className="space-y-2"><Label htmlFor="currentArticleId">当前固定文章</Label><Select name="currentArticleId" defaultValue={currentArticle?.articleId ? String(currentArticle.articleId) : (articles[0] ? String(articles[0].id) : 'none')}><SelectTrigger id="currentArticleId" className="w-full"><SelectValue placeholder="请选择文章" /></SelectTrigger><SelectContent>{articles.map((article) => <SelectItem key={article.id} value={String(article.id)}>{article.title}</SelectItem>)}</SelectContent></Select></div>
+              <Button type="submit">保存场次</Button>
+            </form>
+          </CardContent>
         </Card>
 
         <div className="space-y-6">
-          <Card title="当前文章">
-            <div className="space-y-3 text-sm text-zinc-600">
-              <p>最近解析结果：{currentArticle ? `#${currentArticle.articleId}` : '暂无'}</p>
-              <p>最近更新时间：{formatDateTime(currentArticle?.createdAt)}</p>
-              <form action={setCurrentArticleAction} className="space-y-3">
-                <input type="hidden" name="redirectTo" value={`/admin/campaigns/${campaign.id}`} />
-                <input type="hidden" name="campaignId" value={campaign.id} />
-                <select name="articleId" defaultValue={currentArticle?.articleId ?? articleAssignments[0]?.articleId ?? ''} className="w-full rounded-xl border border-zinc-200 px-3 py-2 outline-none transition focus:border-zinc-900">
-                  {articleAssignments.map((article) => <option key={article.articleId} value={article.articleId}>{article.title}</option>)}
-                </select>
-                <SubmitButton className="w-full">手动切换当前文章</SubmitButton>
-              </form>
-            </div>
+          <Card>
+            <CardHeader><CardTitle>当前固定文章</CardTitle></CardHeader>
+            <CardContent>
+              <div className="space-y-3 text-sm text-muted-foreground">
+                <p>当前文章：{articles.find((article) => article.id === currentArticle?.articleId)?.title ?? '未设置'}</p>
+                <p>最近更新时间：{formatDateTime(currentArticle?.createdAt)}</p>
+                <form action={setCurrentArticleAction} className="space-y-3">
+                  <input type="hidden" name="redirectTo" value={`/admin/campaigns/${campaign.id}`} />
+                  <input type="hidden" name="campaignId" value={campaign.id} />
+                  <Select name="articleId" defaultValue={String(currentArticle?.articleId ?? articles[0]?.id ?? '')}><SelectTrigger className="w-full"><SelectValue /></SelectTrigger><SelectContent>{articles.map((article) => <SelectItem key={article.id} value={String(article.id)}>{article.title}</SelectItem>)}</SelectContent></Select>
+                  <Button type="submit" className="w-full">切换当前文章</Button>
+                </form>
+              </div>
+            </CardContent>
           </Card>
 
-          <Card title="排行榜预览" description={`当前有 ${leaderboard.length} 名学生进入榜单`}>
-            <div className="space-y-3">
-              {leaderboard.slice(0, 8).map((entry) => (
-                <div key={entry.studentId} className="flex items-center justify-between rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-3 text-sm">
-                  <div>
-                    <p className="font-medium text-zinc-950">#{entry.rank} {entry.name}</p>
-                    <p className="text-xs text-zinc-400">{entry.studentNo} · {entry.classCode ?? '未分班'}</p>
+          <Card>
+            <CardHeader><CardTitle>排行榜预览</CardTitle><CardDescription>当前有 {leaderboard.length} 名学生进入榜单</CardDescription></CardHeader>
+            <CardContent>
+              <div className="space-y-3">
+                {leaderboard.slice(0, 8).map((entry) => (
+                  <div key={entry.studentId} className="flex items-center justify-between rounded-xl border border-border bg-muted/40 px-4 py-3 text-sm">
+                    <div>
+                      <p className="font-medium">#{entry.rank} {entry.name}</p>
+                      <p className="text-xs text-muted-foreground">{entry.studentNo} · {entry.classCode ?? '未分班'}</p>
+                    </div>
+                    <div className="text-right">
+                      <p className="font-semibold">{formatKpm(entry.scoreKpm)}</p>
+                      <p className="text-xs text-muted-foreground">{formatPercent(entry.accuracy)}</p>
+                    </div>
                   </div>
-                  <div className="text-right">
-                    <p className="font-semibold text-zinc-950">{formatKpm(entry.scoreKpm)}</p>
-                    <p className="text-xs text-zinc-400">{formatPercent(entry.accuracy)}</p>
-                  </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            </CardContent>
           </Card>
         </div>
       </div>
     </div>
-  );
-}
-
-function Field({ label, name, placeholder, defaultValue, type = 'text' }: { label: string; name: string; placeholder: string; defaultValue?: string | number | null; type?: string }) {
-  return (
-    <label className="block space-y-2 text-sm font-medium text-zinc-700">
-      <span>{label}</span>
-      <input name={name} type={type} defaultValue={defaultValue ?? ''} placeholder={placeholder} className="w-full rounded-xl border border-zinc-200 px-3 py-2 outline-none transition focus:border-zinc-900" />
-    </label>
-  );
-}
-
-function SelectField({ label, name, defaultValue, options }: { label: string; name: string; defaultValue?: string; options: Array<[string, string]> }) {
-  return (
-    <label className="block space-y-2 text-sm font-medium text-zinc-700">
-      <span>{label}</span>
-      <select name={name} defaultValue={defaultValue} className="w-full rounded-xl border border-zinc-200 px-3 py-2 outline-none transition focus:border-zinc-900">
-        {options.map(([value, labelText]) => <option key={value} value={value}>{labelText}</option>)}
-      </select>
-    </label>
-  );
+  )
 }
 
 function toDateTimeLocal(date: Date) {
-  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
-  return local.toISOString().slice(0, 16);
+  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60000)
+  return local.toISOString().slice(0, 16)
 }

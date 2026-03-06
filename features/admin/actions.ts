@@ -116,7 +116,7 @@ export async function createStudentAction(formData: FormData) {
     studentNo: formData.get('studentNo'),
     name: formData.get('name'),
     campusEmail: formData.get('campusEmail'),
-    classGroupId: formData.get('classGroupId') || undefined,
+    classGroupId: formData.get('classGroupId') === 'none' ? undefined : formData.get('classGroupId') || undefined,
     notes: formData.get('notes') || undefined,
   });
 
@@ -244,6 +244,7 @@ export async function saveArticleAction(formData: FormData) {
   const data = parsed.data;
   const contentNormalized = normalizeTypingText(data.contentRaw);
   const wordCount = contentNormalized.split(/\s+/).filter(Boolean).length;
+
   const values = {
     title: data.title,
     slug: data.slug ? slugify(data.slug) : slugify(data.title),
@@ -286,7 +287,7 @@ export async function saveCampaignAction(formData: FormData) {
     rankingVisibility: formData.get('rankingVisibility'),
     startAt: formData.get('startAt') || undefined,
     endAt: formData.get('endAt') || undefined,
-    currentArticleId: formData.get('currentArticleId') || undefined,
+    currentArticleId: formData.get('currentArticleId') === 'none' ? undefined : formData.get('currentArticleId') || undefined,
   });
 
   if (!parsed.success) {
@@ -294,10 +295,16 @@ export async function saveCampaignAction(formData: FormData) {
   }
 
   const data = parsed.data;
-  const articleIds = formData
+  const articleIdsFromForm = formData
     .getAll('articleIds')
     .map((value) => Number(value))
     .filter((value) => Number.isInteger(value) && value > 0);
+
+  const articleIds = articleIdsFromForm.length > 0
+    ? articleIdsFromForm
+    : data.currentArticleId
+      ? [data.currentArticleId]
+      : []
 
   const values = {
     name: data.name,
