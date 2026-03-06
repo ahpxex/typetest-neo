@@ -65,10 +65,10 @@ export default async function ResultPage({ params }: { params: Promise<{ attempt
             ) : null}
           </CardContent>
           <CardFooter className="justify-center gap-3 border-t">
-            <Button asChild variant="outline">
+            <Button asChild variant="outline" className="min-w-32">
               <Link href="/ranking">查看排行榜</Link>
             </Button>
-            <Button asChild>
+            <Button asChild className="min-w-32 bg-zinc-900 text-white hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-950 dark:hover:bg-zinc-200">
               <Link href="/typing">重新测试</Link>
             </Button>
           </CardFooter>
