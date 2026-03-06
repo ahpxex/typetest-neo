@@ -19,7 +19,7 @@ export default async function AdminLoginPage() {
           <p className="text-xs font-semibold uppercase tracking-[0.28em] text-muted-foreground">Admin Portal</p>
           <h1 className="mt-4 text-4xl font-semibold tracking-tight">管理员后台</h1>
           <p className="mt-4 max-w-xl text-base leading-8 text-muted-foreground">
-            在这里统一管理学生名单、固定测试文章、考试场次、成绩记录与导出操作。
+            在这里统一管理学生名单、固定测试文章对应的成绩记录与导出操作。
           </p>
 
           <div className="mt-8 grid gap-4 md:grid-cols-2">
@@ -29,16 +29,16 @@ export default async function AdminLoginPage() {
                 <CardDescription>支持手动录入与批量导入学生名单。</CardDescription>
               </CardHeader>
               <CardContent>
-                <p className="text-sm text-muted-foreground">支持班级归档、状态控制和邮箱维护。</p>
+                <p className="text-sm text-muted-foreground">支持校园邮箱维护和学生状态控制。</p>
               </CardContent>
             </Card>
             <Card>
               <CardHeader>
-                <CardTitle>场次配置</CardTitle>
-                <CardDescription>设置当前测试和固定文章。</CardDescription>
+                <CardTitle>成绩与导出</CardTitle>
+                <CardDescription>查看测试结果并导出完整成绩数据。</CardDescription>
               </CardHeader>
               <CardContent>
-                <p className="text-sm text-muted-foreground">后台只保留必要配置，避免过度复杂。</p>
+                <p className="text-sm text-muted-foreground">后台只保留必要模块，避免页面过多。</p>
               </CardContent>
             </Card>
           </div>
