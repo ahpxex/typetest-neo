@@ -53,7 +53,7 @@ type TypingStatsBarProps = {
 };
 
 const VISIBLE_LINE_COUNT = 4;
-const ESTIMATED_GLYPH_WIDTH = 19;
+const ESTIMATED_GLYPH_WIDTH = 14;
 
 function buildVisibleLines(referenceChars: string[], maxCharsPerLine: number) {
   const safeWidth = Math.max(12, maxCharsPerLine);
@@ -168,7 +168,7 @@ const TypingViewport = memo(function TypingViewport({
           autoFocus
         />
 
-        <div className="w-full font-mono text-[1.45rem] leading-[1.9] tracking-[0.01em] text-zinc-400/60 md:text-[1.85rem] md:leading-[1.8]">
+        <div className="mx-auto w-full max-w-[1400px] font-mono text-[1.18rem] leading-[1.95] tracking-[0.01em] text-zinc-400/60 md:text-[1.55rem] md:leading-[1.85]">
           {!isFocused && renderedText.length === 0 ? (
             <div className="mb-8 text-center text-xs uppercase tracking-[0.2em] text-muted-foreground">
               点击文本区域开始输入
