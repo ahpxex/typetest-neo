@@ -7,6 +7,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { calculateTypingMetricsPrepared, normalizeTypingText } from '@/modules/typing-engine';
 import { formatDurationSeconds } from '@/lib/format';
+import { isDevelopment } from '@/lib/env';
 import { cn } from '@/lib/utils';
 
 type TypingTestClientProps = {
@@ -342,6 +343,7 @@ export function TypingTestClient({
 
   const elapsedSeconds = Math.max(0, Math.min(durationSeconds, Math.floor((nowMs - startedAtMs) / 1000)));
   const remainingSeconds = Math.max(0, durationSeconds - elapsedSeconds);
+  const displayRemainingSeconds = isDevelopment ? durationSeconds : remainingSeconds;
 
   const normalizedReferenceText = useMemo(() => normalizeTypingText(referenceText), [referenceText]);
   const normalizedTypedText = useMemo(() => normalizeTypingText(renderedText), [renderedText]);
@@ -424,7 +426,7 @@ export function TypingTestClient({
   }, [attemptId, backspaceCount, elapsedSeconds, pasteCount, router]);
 
   useEffect(() => {
-    if (remainingSeconds === 0 && !submitLockRef.current) {
+    if (!isDevelopment && remainingSeconds === 0 && !submitLockRef.current) {
       void submitAttempt();
     }
   }, [remainingSeconds, submitAttempt]);
@@ -475,7 +477,7 @@ export function TypingTestClient({
       {error ? <p className="mt-3 text-sm text-destructive">{error}</p> : null}
 
       <TypingStatsBar
-        remainingSeconds={remainingSeconds}
+        remainingSeconds={displayRemainingSeconds}
         scoreKpm={metrics.scoreKpm}
         accuracy={metrics.accuracy}
         progress={metrics.progress}
