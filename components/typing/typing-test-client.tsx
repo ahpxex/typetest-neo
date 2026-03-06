@@ -353,17 +353,24 @@ export function TypingTestClient({
         <div className="pointer-events-auto w-full rounded-full border border-border bg-background/92 px-4 py-3 shadow-lg backdrop-blur md:px-5">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex flex-wrap items-center gap-2 md:gap-3">
-              <FloatingMetric label="time" value={formatDurationSeconds(remainingSeconds)} accent />
-              <FloatingMetric label="kpm" value={`${metrics.scoreKpm}`} />
-              <FloatingMetric label="accuracy" value={`${metrics.accuracy}%`} />
-              <FloatingMetric label="progress" value={`${metrics.progress}%`} />
-              <FloatingMetric label="errors" value={`${metrics.charCountError}`} />
-              <FloatingMetric label="backspace" value={`${backspaceCount}`} />
-              <FloatingMetric label="paste" value={`${pasteCount}`} />
+              <FloatingMetric label="剩余时间" value={formatDurationSeconds(remainingSeconds)} accent />
+              <FloatingMetric label="速度" value={`${metrics.scoreKpm}`} />
+              <FloatingMetric label="正确率" value={`${metrics.accuracy}%`} />
+              <FloatingMetric label="进度" value={`${metrics.progress}%`} />
+              <FloatingMetric label="错误" value={`${metrics.charCountError}`} />
+              <FloatingMetric label="退格" value={`${backspaceCount}`} />
+              <FloatingMetric label="粘贴" value={`${pasteCount}`} />
             </div>
 
             <div className="flex flex-wrap items-center gap-2">
-              <Button type="button" size="sm" onMouseDown={(event) => event.preventDefault()} onClick={() => void submitAttempt()} disabled={submitting}>
+              <Button
+                type="button"
+                size="sm"
+                className="rounded-full px-4 shadow-none"
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => void submitAttempt()}
+                disabled={submitting}
+              >
                 {submitting ? '提交中…' : '提交成绩'}
               </Button>
             </div>
@@ -377,7 +384,7 @@ export function TypingTestClient({
 function FloatingMetric({ label, value, accent = false }: { label: string; value: string; accent?: boolean }) {
   return (
     <div className={cn('rounded-full border border-border bg-muted/40 px-3 py-2 text-sm', accent && 'border-primary/30 bg-primary/8')}>
-      <span className="mr-2 text-[10px] uppercase tracking-[0.18em] text-muted-foreground">{label}</span>
+      <span className="mr-2 text-[10px] tracking-[0.08em] text-muted-foreground">{label}</span>
       <span className={cn('font-semibold', accent && 'text-primary')}>{value}</span>
     </div>
   );
