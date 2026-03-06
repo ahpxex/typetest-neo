@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import Script from 'next/script';
 import { Geist, Geist_Mono } from 'next/font/google';
 
 import { APP_DESCRIPTION, APP_NAME } from '@/lib/env';
@@ -27,6 +28,27 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="zh-CN">
+      <head>
+        {process.env.NODE_ENV === 'development' && (
+          <Script
+            src='//unpkg.com/react-grab/dist/index.global.js'
+            crossOrigin='anonymous'
+            strategy='beforeInteractive'
+            data-options={JSON.stringify({
+              activationKey: 'Meta+K',
+              activationMode: 'toggle',
+              allowActivationInsideInput: false,
+              maxContextLines: 50,
+            })}
+          />
+        )}
+        {process.env.NODE_ENV === 'development' && (
+          <Script
+            src='//unpkg.com/@react-grab/codex/dist/client.global.js'
+            strategy='lazyOnload'
+          />
+        )}
+      </head>
       <body className={`${geistSans.variable} ${geistMono.variable} bg-zinc-50 text-zinc-950 antialiased`}>
         {children}
       </body>
