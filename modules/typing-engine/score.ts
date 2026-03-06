@@ -10,30 +10,34 @@ export function calculateTypingMetrics({
   typedText,
   durationSeconds,
 }: ScoreInput): TypingMetrics {
-  const reference = normalizeTypingText(referenceText);
-  const typed = normalizeTypingText(typedText);
+  return calculateTypingMetricsPrepared({
+    referenceText: normalizeTypingText(referenceText),
+    typedText: normalizeTypingText(typedText),
+    durationSeconds,
+  });
+}
 
-  const referenceChars = Array.from(reference);
-  const typedChars = Array.from(typed);
-  const maxLength = Math.max(referenceChars.length, typedChars.length);
+export function calculateTypingMetricsPrepared({
+  referenceText,
+  typedText,
+  durationSeconds,
+}: ScoreInput): TypingMetrics {
+  const referenceChars = Array.from(referenceText);
+  const typedChars = Array.from(typedText);
 
   let charCountCorrect = 0;
   let charCountError = 0;
 
-  for (let index = 0; index < maxLength; index += 1) {
+  for (let index = 0; index < typedChars.length; index += 1) {
     const referenceChar = referenceChars[index];
     const typedChar = typedChars[index];
 
-    if (referenceChar === undefined && typedChar !== undefined) {
+    if (referenceChar === undefined) {
       charCountError += 1;
       continue;
     }
 
-    if (typedChar === undefined) {
-      continue;
-    }
-
-    if (referenceChar === typedChar) {
+    if (typedChar === referenceChar) {
       charCountCorrect += 1;
     } else {
       charCountError += 1;

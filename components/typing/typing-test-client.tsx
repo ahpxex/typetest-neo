@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { calculateTypingMetrics } from '@/modules/typing-engine';
+import { calculateTypingMetricsPrepared, normalizeTypingText } from '@/modules/typing-engine';
 import { formatDurationSeconds } from '@/lib/format';
 import { cn } from '@/lib/utils';
 
@@ -17,6 +17,27 @@ type TypingTestClientProps = {
   durationSeconds: number;
   startedAt: string;
 };
+
+function getVisibleRange(referenceChars: string[], currentCharIndex: number) {
+  const total = referenceChars.length;
+
+  if (total <= 900) {
+    return { start: 0, end: total };
+  }
+
+  let start = Math.max(0, currentCharIndex - 220);
+  let end = Math.min(total, currentCharIndex + 520);
+
+  while (start > 0 && referenceChars[start - 1] !== ' ' && referenceChars[start - 1] !== '\n') {
+    start -= 1;
+  }
+
+  while (end < total && referenceChars[end] !== ' ' && referenceChars[end] !== '\n') {
+    end += 1;
+  }
+
+  return { start, end };
+}
 
 export function TypingTestClient({
   attemptId,
@@ -30,7 +51,7 @@ export function TypingTestClient({
   const startedAtMs = new Date(startedAt).getTime();
   const submitLockRef = useRef(false);
   const hiddenInputRef = useRef<HTMLTextAreaElement | null>(null);
-  const activeCharRef = useRef<HTMLSpanElement | null>(null);
+  const saveTimerRef = useRef<number | null>(null);
   const [typedText, setTypedText] = useState('');
   const [backspaceCount, setBackspaceCount] = useState(0);
   const [pasteCount, setPasteCount] = useState(0);
@@ -58,37 +79,53 @@ export function TypingTestClient({
 
   useEffect(() => {
     const storageKey = `typing-attempt-${attemptId}`;
-    window.localStorage.setItem(storageKey, typedText);
+
+    if (saveTimerRef.current) {
+      window.clearTimeout(saveTimerRef.current);
+    }
+
+    saveTimerRef.current = window.setTimeout(() => {
+      window.localStorage.setItem(storageKey, typedText);
+    }, 250);
+
+    return () => {
+      if (saveTimerRef.current) {
+        window.clearTimeout(saveTimerRef.current);
+      }
+    };
   }, [attemptId, typedText]);
 
   useEffect(() => {
     hiddenInputRef.current?.focus();
   }, []);
 
-  useEffect(() => {
-    activeCharRef.current?.scrollIntoView({
-      block: 'center',
-      inline: 'nearest',
-      behavior: 'smooth',
-    });
-  }, [typedText]);
-
   const elapsedSeconds = Math.max(0, Math.min(durationSeconds, Math.floor((nowMs - startedAtMs) / 1000)));
   const remainingSeconds = Math.max(0, durationSeconds - elapsedSeconds);
 
+  const normalizedReferenceText = useMemo(() => normalizeTypingText(referenceText), [referenceText]);
+  const normalizedTypedText = useMemo(() => normalizeTypingText(typedText), [typedText]);
+
   const metrics = useMemo(
     () =>
-      calculateTypingMetrics({
-        referenceText,
-        typedText,
+      calculateTypingMetricsPrepared({
+        referenceText: normalizedReferenceText,
+        typedText: normalizedTypedText,
         durationSeconds: Math.max(elapsedSeconds, 1),
       }),
-    [elapsedSeconds, referenceText, typedText],
+    [elapsedSeconds, normalizedReferenceText, normalizedTypedText],
   );
 
   const referenceChars = useMemo(() => Array.from(referenceText), [referenceText]);
   const typedChars = useMemo(() => Array.from(typedText), [typedText]);
   const currentCharIndex = Math.min(typedChars.length, Math.max(referenceChars.length - 1, 0));
+  const visibleRange = useMemo(
+    () => getVisibleRange(referenceChars, currentCharIndex),
+    [currentCharIndex, referenceChars],
+  );
+  const visibleChars = useMemo(
+    () => referenceChars.slice(visibleRange.start, visibleRange.end),
+    [referenceChars, visibleRange.end, visibleRange.start],
+  );
 
   const submitAttempt = useCallback(async () => {
     if (submitLockRef.current) {
@@ -192,31 +229,37 @@ export function TypingTestClient({
           </div>
         ) : null}
 
-        <div className="max-h-[520px] overflow-auto pr-2 text-[1.65rem] leading-[1.95] tracking-[0.01em] text-zinc-400/60 md:text-[2.15rem] md:leading-[1.8]">
-          {referenceChars.map((character, index) => {
-            const typedCharacter = typedChars[index];
-            const hasTyped = typedCharacter !== undefined;
-            const isActive = index === currentCharIndex;
-            const isCorrect = hasTyped && typedCharacter === character;
-            const isIncorrect = hasTyped && typedCharacter !== character;
+        <div className="whitespace-pre-wrap break-words text-[1.65rem] leading-[1.95] tracking-[0.01em] text-zinc-400/60 md:text-[2.15rem] md:leading-[1.8]">
+          {visibleRange.start > 0 ? <div className="mb-6 text-xs uppercase tracking-[0.18em] text-muted-foreground">···</div> : null}
 
-            return (
-              <span
-                key={`${index}-${character}`}
-                ref={isActive ? activeCharRef : null}
-                className={cn(
-                  'relative transition-colors',
-                  isCorrect && 'text-foreground',
-                  isIncorrect && 'bg-destructive/15 text-destructive',
-                  isActive && 'bg-primary/12 text-foreground before:absolute before:bottom-0 before:left-0 before:h-[2px] before:w-full before:bg-primary',
-                  character === ' ' && 'mr-[0.18em]',
-                  character === '\n' && 'block h-4 w-full',
-                )}
-              >
-                {character === ' ' ? '\u00A0' : character === '\n' ? '' : character}
-              </span>
-            );
-          })}
+          <div>
+            {visibleChars.map((character, visibleIndex) => {
+              const index = visibleRange.start + visibleIndex;
+              const typedCharacter = typedChars[index];
+              const hasTyped = typedCharacter !== undefined;
+              const isActive = index === currentCharIndex;
+              const isCorrect = hasTyped && typedCharacter === character;
+              const isIncorrect = hasTyped && typedCharacter !== character;
+
+              return (
+                <span
+                  key={`${index}-${character}`}
+                  className={cn(
+                    'relative transition-colors',
+                    isCorrect && 'text-foreground',
+                    isIncorrect && 'bg-destructive/15 text-destructive',
+                    isActive && 'bg-primary/12 text-foreground before:absolute before:bottom-0 before:left-0 before:h-[2px] before:w-full before:bg-primary',
+                    character === ' ' && 'mr-[0.12em]',
+                    character === '\n' && 'block h-4 w-full',
+                  )}
+                >
+                  {character === '\n' ? '' : character}
+                </span>
+              );
+            })}
+          </div>
+
+          {visibleRange.end < referenceChars.length ? <div className="mt-6 text-xs uppercase tracking-[0.18em] text-muted-foreground">···</div> : null}
         </div>
       </div>
 
