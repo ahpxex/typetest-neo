@@ -12,7 +12,6 @@ import { cn } from '@/lib/utils';
 type TypingTestClientProps = {
   attemptId: number;
   articleTitle: string;
-  campaignName: string;
   referenceText: string;
   durationSeconds: number;
   startedAt: string;
@@ -26,7 +25,6 @@ type LineSegment = {
 
 type TypingViewportProps = {
   articleTitle: string;
-  campaignName: string;
   renderedText: string;
   isFocused: boolean;
   typedChars: string[];
@@ -123,7 +121,6 @@ function getCurrentLineIndex(lines: LineSegment[], currentCharIndex: number) {
 
 const TypingViewport = memo(function TypingViewport({
   articleTitle,
-  campaignName,
   renderedText,
   isFocused,
   typedChars,
@@ -255,7 +252,6 @@ const TypingStatsBar = memo(function TypingStatsBar({
 export function TypingTestClient({
   attemptId,
   articleTitle,
-  campaignName,
   referenceText,
   durationSeconds,
   startedAt,
@@ -511,7 +507,6 @@ export function TypingTestClient({
     <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden pb-24 md:pb-28">
       <TypingViewport
         articleTitle={articleTitle}
-        campaignName={campaignName}
         renderedText={renderedText}
         isFocused={isFocused}
         typedChars={typedChars}
