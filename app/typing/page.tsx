@@ -85,19 +85,28 @@ export default async function TypingPage() {
   }
 
   return (
-    <PageWrap studentName={student.name}>
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-border bg-card px-5 py-4 shadow-sm">
-        <div>
-          <p className="text-sm text-muted-foreground">当前学生：{student.name}</p>
-          <p className="text-xs text-muted-foreground">{student.studentNo} · {student.campusEmail}</p>
+    <PageWrap
+      studentName={student.name}
+      extraInfo={
+        <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground md:justify-end">
+          <span>{student.studentNo}</span>
+          <span>·</span>
+          <span>{formatDurationSeconds(typingContext.campaign.durationSeconds)}</span>
+          <span>·</span>
+          <span>{formatDateTime(typingContext.attempt.startedAt)}</span>
         </div>
-        <div className="flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
-          <span>测试时长：{formatDurationSeconds(typingContext.campaign.durationSeconds)}</span>
-          <span>开始时间：{formatDateTime(typingContext.attempt.startedAt)}</span>
-          <form action={logoutAction}><Button type="submit" variant="outline">退出登录</Button></form>
-        </div>
-      </div>
-
+      }
+      controls={
+        <>
+          <Button asChild variant="outline" size="sm">
+            <Link href="/ranking">查看排行榜</Link>
+          </Button>
+          <form action={logoutAction}>
+            <Button type="submit" variant="outline" size="sm">退出登录</Button>
+          </form>
+        </>
+      }
+    >
       <TypingTestClient
         attemptId={typingContext.attempt.id}
         articleTitle={typingContext.article.title}
@@ -110,18 +119,31 @@ export default async function TypingPage() {
   );
 }
 
-function PageWrap({ studentName, children }: { studentName: string; children: React.ReactNode }) {
+function PageWrap({
+  studentName,
+  children,
+  extraInfo,
+  controls,
+}: {
+  studentName: string;
+  children: React.ReactNode;
+  extraInfo?: React.ReactNode;
+  controls?: React.ReactNode;
+}) {
   return (
     <main className="h-screen overflow-hidden bg-background px-4 py-4 md:px-6 md:py-5">
       <div className="mx-auto flex h-full max-w-7xl flex-col gap-4 overflow-hidden">
-        <header className="shrink-0 space-y-2">
+        <header className="shrink-0 border-b border-border pb-3">
           <p className="text-xs font-semibold uppercase tracking-[0.24em] text-muted-foreground">Student</p>
-          <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="mt-2 flex flex-wrap items-start justify-between gap-3">
             <div>
               <h1 className="text-3xl font-semibold tracking-tight">打字测试</h1>
               <p className="text-sm text-muted-foreground">欢迎回来，{studentName}</p>
             </div>
-            <Button asChild variant="outline"><Link href="/ranking">查看排行榜</Link></Button>
+            <div className="flex flex-col items-start gap-2 md:items-end">
+              {extraInfo}
+              <div className="flex flex-wrap items-center gap-2">{controls ?? <Button asChild variant="outline" size="sm"><Link href="/ranking">查看排行榜</Link></Button>}</div>
+            </div>
           </div>
         </header>
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden">{children}</div>
