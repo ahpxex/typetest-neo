@@ -246,7 +246,7 @@ const TypingStatsBar = memo(function TypingStatsBar({
         <FloatingMetric label="错误" value={`${charCountError}`} />
         <FloatingMetric label="退格" value={`${backspaceCount}`} />
         <FloatingMetric label="粘贴" value={`${pasteCount}`} />
-        <Button type="button" size="sm" className="rounded-full px-4 shadow-none" onMouseDown={(event) => event.preventDefault()} onClick={onSubmit} disabled={submitting}>
+        <Button type="button" size="sm" className="rounded-full px-3 py-2 text-sm shadow-none" onMouseDown={(event) => event.preventDefault()} onClick={onSubmit} disabled={submitting}>
           {submitting ? '提交中…' : '提交成绩'}
         </Button>
       </div>
