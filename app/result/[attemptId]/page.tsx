@@ -26,21 +26,16 @@ export default async function ResultPage({ params }: { params: Promise<{ attempt
 
   return (
     <main className="min-h-screen bg-background px-4 py-8 md:px-6">
-      <div className="mx-auto max-w-4xl space-y-6">
-        <header className="space-y-3">
-          <div className="flex flex-wrap items-center gap-3">
-            <h1 className="text-3xl font-semibold tracking-tight">成绩结果</h1>
-            <Badge variant={attempt.status === 'submitted' ? 'secondary' : attempt.status === 'invalidated' ? 'destructive' : 'outline'}>
-              {attempt.status}
-            </Badge>
-          </div>
-          <p className="text-sm text-muted-foreground">{attempt.campaignName} · {attempt.articleTitle}</p>
-        </header>
-
+      <div className="mx-auto max-w-4xl">
         <Card>
           <CardHeader>
-            <CardTitle>成绩摘要</CardTitle>
-            <CardDescription>本次测试的核心结果如下。</CardDescription>
+            <div className="flex flex-wrap items-center gap-3">
+              <CardTitle>成绩摘要</CardTitle>
+              <Badge variant={attempt.status === 'submitted' ? 'secondary' : attempt.status === 'invalidated' ? 'destructive' : 'outline'}>
+                {attempt.status}
+              </Badge>
+            </div>
+            <CardDescription>{attempt.articleTitle}</CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">
             <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -68,7 +63,7 @@ export default async function ResultPage({ params }: { params: Promise<{ attempt
             <Button asChild variant="outline" className="min-w-32">
               <Link href="/ranking">查看排行榜</Link>
             </Button>
-            <Button asChild className="min-w-32 bg-zinc-900 text-white hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-950 dark:hover:bg-zinc-200">
+            <Button asChild variant="default" className="min-w-32">
               <Link href="/typing">重新测试</Link>
             </Button>
           </CardFooter>
