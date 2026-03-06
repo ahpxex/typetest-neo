@@ -363,7 +363,6 @@ export function TypingTestClient({
             </div>
 
             <div className="flex flex-wrap items-center gap-2">
-              <Button type="button" variant="ghost" size="sm" onMouseDown={(event) => event.preventDefault()} onClick={focusTypingArea}>聚焦输入</Button>
               <Button type="button" size="sm" onMouseDown={(event) => event.preventDefault()} onClick={() => void submitAttempt()} disabled={submitting}>
                 {submitting ? '提交中…' : '提交成绩'}
               </Button>
