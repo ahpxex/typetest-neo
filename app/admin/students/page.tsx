@@ -53,7 +53,7 @@ export default async function AdminStudentsPage({ searchParams }: { searchParams
       ) : null}
 
       <Card className="flex min-h-0 flex-1 flex-col overflow-hidden">
-        <CardContent className="flex min-h-0 flex-1 flex-col overflow-hidden pt-6">
+        <CardContent className="flex min-h-0 flex-1 flex-col overflow-hidden">
           <form className="mb-3 flex shrink-0 gap-3">
             <Input name="query" defaultValue={query} placeholder="按学号、姓名或邮箱搜索" />
             <Button type="submit" variant="outline">搜索</Button>
