@@ -10,7 +10,6 @@ import { cn } from '@/lib/utils'
 const tabs = [
   { href: '/admin/students', label: '学生' },
   { href: '/admin/attempts', label: '成绩' },
-  { href: '/admin/export', label: '导出' },
 ]
 
 function isActiveTab(pathname: string, href: string) {

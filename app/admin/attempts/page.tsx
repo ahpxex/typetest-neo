@@ -3,7 +3,7 @@ import Link from 'next/link'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { setAttemptStatusAction } from '@/features/admin/actions'
@@ -21,20 +21,23 @@ export default async function AdminAttemptsPage({ searchParams }: { searchParams
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-hidden">
-      <header className="shrink-0">
-        <h1 className="text-2xl font-semibold tracking-tight md:text-3xl">成绩记录</h1>
-        <p className="mt-1 text-sm text-muted-foreground">查看学生成绩，并对异常记录执行作废或恢复。</p>
+      <header className="flex shrink-0 flex-wrap items-end justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight md:text-3xl">成绩记录</h1>
+          <p className="mt-1 text-sm text-muted-foreground">共 {attempts.length} 条记录 · 查看学生成绩并处理异常记录。</p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button asChild variant="outline">
+            <Link href="/api/export/attempts">导出全部 CSV</Link>
+          </Button>
+        </div>
       </header>
 
       {success ? <Alert className="shrink-0"><AlertTitle>操作成功</AlertTitle><AlertDescription>{success}</AlertDescription></Alert> : null}
       {error ? <Alert variant="destructive" className="shrink-0"><AlertTitle>操作失败</AlertTitle><AlertDescription>{error}</AlertDescription></Alert> : null}
 
       <Card className="flex min-h-0 flex-1 flex-col overflow-hidden">
-        <CardHeader className="shrink-0 pb-3">
-          <CardTitle>成绩列表</CardTitle>
-          <CardDescription>共 {attempts.length} 条记录</CardDescription>
-        </CardHeader>
-        <CardContent className="flex min-h-0 flex-1 flex-col overflow-hidden">
+        <CardContent className="flex min-h-0 flex-1 flex-col overflow-hidden pt-6">
           <form className="mb-3 flex shrink-0 gap-3">
             <Input name="query" defaultValue={query} placeholder="按学生、邮箱或文章搜索" />
             <Button type="submit" variant="outline">搜索</Button>
