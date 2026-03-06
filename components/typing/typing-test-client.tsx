@@ -385,7 +385,7 @@ function FloatingMetric({ label, value, accent = false }: { label: string; value
   return (
     <div className={cn('rounded-full border border-border bg-muted/40 px-3 py-2 text-sm', accent && 'border-primary/30 bg-primary/8')}>
       <span className="mr-2 text-xs font-medium tracking-[0.04em] text-muted-foreground">{label}</span>
-      <span className={cn('font-semibold', accent && 'text-primary')}>{value}</span>
+      <span className={cn('font-semibold tabular-nums', accent && 'text-primary')}>{value}</span>
     </div>
   );
 }
