@@ -63,6 +63,29 @@ function deterministicIndex(total: number, seed: string) {
   return value % total;
 }
 
+async function getRotatingArticlePool() {
+  const publishedArticles = await db
+    .select({
+      campaignId: sql<number>`0`,
+      articleId: articles.id,
+      sortOrder: sql<number>`0`,
+      isActive: sql<boolean>`1`,
+      title: articles.title,
+      slug: articles.slug,
+      language: articles.language,
+      status: articles.status,
+      contentRaw: articles.contentRaw,
+      source: articles.source,
+    })
+    .from(articles)
+    .where(eq(articles.status, 'published'))
+    .orderBy(asc(articles.slug));
+
+  const withoutDevSeed = publishedArticles.filter((article) => article.source !== 'seed:dev');
+
+  return withoutDevSeed.length > 0 ? withoutDevSeed : publishedArticles;
+}
+
 export async function getStudentByIdentity(input: StudentIdentityInput) {
   return db.query.students.findFirst({
     where: and(
@@ -201,47 +224,57 @@ export async function resolveCurrentArticleForCampaign(campaignId: number) {
     return null;
   }
 
-  const assignments = (await getCampaignArticleAssignments(campaignId)).filter(
+  const linkedAssignments = (await getCampaignArticleAssignments(campaignId)).filter(
     (assignment) => assignment.isActive,
   );
+  const rotatingPool = await getRotatingArticlePool();
+  const pool = rotatingPool.length > 0 ? rotatingPool : linkedAssignments;
 
-  if (assignments.length === 0) {
+  if (pool.length === 0) {
     return null;
   }
 
-  const latestCurrent = await getLatestCampaignCurrentArticle(campaignId);
-  const manualCurrentIsValid =
-    latestCurrent?.reason === 'manual' &&
-    assignments.some((assignment) => assignment.articleId === latestCurrent.articleId);
-
-  if (manualCurrentIsValid) {
-    return assignments.find((assignment) => assignment.articleId === latestCurrent?.articleId) ?? null;
-  }
-
-  const fallbackArticle = assignments[0];
-
   if (campaign.articleStrategy === 'fixed') {
-    if (!latestCurrent || latestCurrent.articleId !== fallbackArticle.articleId) {
-      await db.insert(campaignCurrentArticles).values({
-        campaignId,
-        articleId: fallbackArticle.articleId,
-        reason: 'manual',
-        resolvedDate: todayKey(),
-      });
-    }
+    const today = todayKey();
+    const existingToday = await db.query.campaignCurrentArticles.findFirst({
+      where: and(
+        eq(campaignCurrentArticles.campaignId, campaignId),
+        eq(campaignCurrentArticles.resolvedDate, today),
+      ),
+      orderBy: [desc(campaignCurrentArticles.createdAt)],
+    });
 
-    return fallbackArticle;
-  }
-
-  if (campaign.articleStrategy === 'shuffle_once') {
-    if (latestCurrent) {
-      const matched = assignments.find((assignment) => assignment.articleId === latestCurrent.articleId);
+    if (existingToday) {
+      const matched = pool.find((article) => article.articleId === existingToday.articleId);
       if (matched) {
         return matched;
       }
     }
 
-    const selected = assignments[Math.floor(Math.random() * assignments.length)] ?? fallbackArticle;
+    const selected = pool[deterministicIndex(pool.length, today)] ?? pool[0];
+
+    await db.insert(campaignCurrentArticles).values({
+      campaignId,
+      articleId: selected.articleId,
+      reason: 'manual',
+      resolvedDate: today,
+    });
+
+    return selected;
+  }
+
+  const latestCurrent = await getLatestCampaignCurrentArticle(campaignId);
+  const fallbackArticle = pool[0];
+
+  if (campaign.articleStrategy === 'shuffle_once') {
+    if (latestCurrent) {
+      const matched = pool.find((assignment) => assignment.articleId === latestCurrent.articleId);
+      if (matched) {
+        return matched;
+      }
+    }
+
+    const selected = pool[Math.floor(Math.random() * pool.length)] ?? fallbackArticle;
     await db.insert(campaignCurrentArticles).values({
       campaignId,
       articleId: selected.articleId,
@@ -262,13 +295,13 @@ export async function resolveCurrentArticleForCampaign(campaignId: number) {
   });
 
   if (todayCurrent) {
-    const matched = assignments.find((assignment) => assignment.articleId === todayCurrent.articleId);
+    const matched = pool.find((assignment) => assignment.articleId === todayCurrent.articleId);
     if (matched) {
       return matched;
     }
   }
 
-  const selected = assignments[deterministicIndex(assignments.length, today)] ?? fallbackArticle;
+  const selected = pool[deterministicIndex(pool.length, today)] ?? fallbackArticle;
 
   await db.insert(campaignCurrentArticles).values({
     campaignId,
