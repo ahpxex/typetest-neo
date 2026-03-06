@@ -110,7 +110,6 @@ export default async function TypingPage() {
       <TypingTestClient
         attemptId={typingContext.attempt.id}
         articleTitle={typingContext.article.title}
-        campaignName={typingContext.campaign.name}
         referenceText={typingContext.article.contentRaw}
         durationSeconds={typingContext.campaign.durationSeconds}
         startedAt={typingContext.attempt.startedAt.toISOString()}

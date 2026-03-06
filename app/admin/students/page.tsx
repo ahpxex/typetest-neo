@@ -1,7 +1,7 @@
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent } from '@/components/ui/card'
 import {
   Dialog,
   DialogContent,
@@ -28,9 +28,15 @@ export default async function AdminStudentsPage({ searchParams }: { searchParams
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-hidden">
-      <header className="shrink-0 space-y-1">
-        <h1 className="text-2xl font-semibold tracking-tight md:text-3xl">学生管理</h1>
-        <p className="text-sm text-muted-foreground">主界面以学生表格为中心，新增与批量导入通过弹窗完成。</p>
+      <header className="flex shrink-0 flex-wrap items-end justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight md:text-3xl">学生管理</h1>
+          <p className="mt-1 text-sm text-muted-foreground">共 {students.length} 名学生 · 主界面以学生表格为中心，新增与批量导入通过弹窗完成。</p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <CreateStudentDialog />
+          <ImportStudentsDialog />
+        </div>
       </header>
 
       {success ? (
@@ -47,19 +53,7 @@ export default async function AdminStudentsPage({ searchParams }: { searchParams
       ) : null}
 
       <Card className="flex min-h-0 flex-1 flex-col overflow-hidden">
-        <CardHeader className="shrink-0 pb-3">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <CardTitle>学生列表</CardTitle>
-              <p className="mt-1 text-sm text-muted-foreground">当前共有 {students.length} 名学生</p>
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <CreateStudentDialog />
-              <ImportStudentsDialog />
-            </div>
-          </div>
-        </CardHeader>
-        <CardContent className="flex min-h-0 flex-1 flex-col overflow-hidden">
+        <CardContent className="flex min-h-0 flex-1 flex-col overflow-hidden pt-6">
           <form className="mb-3 flex shrink-0 gap-3">
             <Input name="query" defaultValue={query} placeholder="按学号、姓名或邮箱搜索" />
             <Button type="submit" variant="outline">搜索</Button>
