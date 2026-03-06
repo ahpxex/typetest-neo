@@ -4,8 +4,15 @@ import { redirect } from 'next/navigation';
 import { z } from 'zod';
 
 import { clearSession, createSession } from '@/lib/auth/session';
-import { getAdminByUsername, getStudentByIdentity } from '@/lib/data/queries';
+import {
+  getAdminByUsername,
+  getStudentByIdentity,
+} from '@/lib/data/queries';
 import { verifyPassword } from '@/lib/auth/password';
+import { DEV_ADMIN_USERNAME, DEV_STUDENT_NO, isDevelopment } from '@/lib/env';
+import { db } from '@/db/client';
+import { students } from '@/db/schema';
+import { eq } from 'drizzle-orm';
 
 export type AuthFormState = {
   error?: string;
@@ -74,6 +81,40 @@ export async function adminLoginAction(
   await clearSession('admin');
   await createSession('admin', admin.id);
 
+  redirect('/admin');
+}
+
+export async function devLoginStudentAction() {
+  if (!isDevelopment) {
+    redirect('/');
+  }
+
+  const student = await db.query.students.findFirst({
+    where: eq(students.studentNo, DEV_STUDENT_NO),
+  });
+
+  if (!student) {
+    redirect('/?error=dev-student-missing');
+  }
+
+  await clearSession('student');
+  await createSession('student', student.id);
+  redirect('/typing');
+}
+
+export async function devLoginAdminAction() {
+  if (!isDevelopment) {
+    redirect('/admin/login');
+  }
+
+  const admin = await getAdminByUsername(DEV_ADMIN_USERNAME);
+
+  if (!admin) {
+    redirect('/?error=dev-admin-missing');
+  }
+
+  await clearSession('admin');
+  await createSession('admin', admin.id);
   redirect('/admin');
 }
 
