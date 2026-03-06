@@ -270,6 +270,8 @@ export function TypingTestClient({
   const saveTimerRef = useRef<number | null>(null);
   const frameRef = useRef<number | null>(null);
   const typedTextRef = useRef('');
+  const initialTypedLengthRef = useRef(0);
+  const hasTypedSinceMountRef = useRef(false);
   const [renderedText, setRenderedText] = useState('');
   const [backspaceCount, setBackspaceCount] = useState(0);
   const [pasteCount, setPasteCount] = useState(0);
@@ -294,6 +296,8 @@ export function TypingTestClient({
     const storageKey = `typing-attempt-${attemptId}`;
     const saved = window.localStorage.getItem(storageKey) ?? '';
     typedTextRef.current = saved;
+    initialTypedLengthRef.current = Array.from(saved).length;
+    hasTypedSinceMountRef.current = false;
     setRenderedText(saved);
 
     if (hiddenInputRef.current) {
@@ -388,6 +392,13 @@ export function TypingTestClient({
     [currentLineIndex, lines],
   );
 
+  const baselineTypedCount = initialTypedLengthRef.current;
+  const liveTypedCount = Math.max(0, typedChars.length - baselineTypedCount);
+  const stabilizedDurationMs = Math.max(elapsedMilliseconds, 5000);
+  const liveScoreKpm = !hasTypedSinceMountRef.current || elapsedMilliseconds <= 0
+    ? 0
+    : Math.round((liveTypedCount / stabilizedDurationMs) * 60000);
+
   const submitAttempt = useCallback(async () => {
     if (submitLockRef.current) {
       return;
@@ -478,6 +489,15 @@ export function TypingTestClient({
 
   const handleInputValue = useCallback((value: string) => {
     typedTextRef.current = value;
+    const currentLength = Array.from(value).length;
+
+    if (currentLength < initialTypedLengthRef.current) {
+      initialTypedLengthRef.current = currentLength;
+    }
+
+    if (currentLength !== initialTypedLengthRef.current) {
+      hasTypedSinceMountRef.current = true;
+    }
 
     if (frameRef.current !== null) {
       return;
@@ -511,7 +531,7 @@ export function TypingTestClient({
 
       <TypingStatsBar
         displayRemainingSeconds={displayRemainingSeconds}
-        scoreKpm={metrics.scoreKpm}
+        scoreKpm={liveScoreKpm}
         accuracy={metrics.accuracy}
         progress={metrics.progress}
         charCountError={metrics.charCountError}
