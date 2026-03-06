@@ -3,7 +3,6 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { calculateTypingMetricsPrepared, normalizeTypingText } from '@/modules/typing-engine';
 import { formatDurationSeconds } from '@/lib/format';
@@ -140,7 +139,6 @@ const TypingViewport = memo(function TypingViewport({
   return (
     <>
       <div className="mb-4 flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
-        <Badge variant="outline">{campaignName}</Badge>
         <span>{articleTitle}</span>
         <span>自动保存已开启</span>
       </div>
