@@ -25,8 +25,8 @@ export default async function ResultPage({ params }: { params: Promise<{ attempt
   const overallRank = leaderboard.find((entry) => entry.attemptId === attempt.attemptId)?.rank
 
   return (
-    <main className="min-h-screen bg-background px-4 py-8 md:px-6">
-      <div className="mx-auto max-w-4xl">
+    <main className="flex min-h-screen items-center justify-center bg-background px-4 py-8 md:px-6">
+      <div className="w-full max-w-4xl">
         <Card>
           <CardHeader>
             <div className="flex flex-wrap items-center gap-3">
