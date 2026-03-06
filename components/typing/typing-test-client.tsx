@@ -156,14 +156,9 @@ export function TypingTestClient({
       </div>
 
       <div
-        role="button"
-        tabIndex={0}
-        onClick={focusTypingArea}
-        onKeyDown={(event) => {
-          if (event.key === 'Enter' || event.key === ' ') {
-            event.preventDefault();
-            focusTypingArea();
-          }
+        onMouseDown={(event) => {
+          event.preventDefault();
+          focusTypingArea();
         }}
         className={cn(
           'group relative min-h-[420px] cursor-text rounded-[2rem] border px-6 py-8 transition-colors md:px-10 md:py-10',
@@ -182,10 +177,11 @@ export function TypingTestClient({
               setBackspaceCount((value) => value + 1);
             }
           }}
-          className="pointer-events-none absolute inset-0 h-full w-full resize-none opacity-0"
+          className="absolute inset-0 h-full w-full resize-none opacity-0"
           spellCheck={false}
           autoCapitalize="off"
           autoCorrect="off"
+          autoFocus
         />
 
         {!isFocused && typedText.length === 0 ? (
@@ -209,10 +205,10 @@ export function TypingTestClient({
                 key={`${index}-${character}`}
                 ref={isActive ? activeCharRef : null}
                 className={cn(
-                  'relative rounded-[4px] transition-colors',
+                  'relative transition-colors',
                   isCorrect && 'text-foreground',
                   isIncorrect && 'bg-destructive/15 text-destructive',
-                  isActive && 'bg-primary/12 text-foreground before:absolute before:bottom-0 before:left-0 before:h-[2px] before:w-full before:rounded-full before:bg-primary',
+                  isActive && 'bg-primary/12 text-foreground before:absolute before:bottom-0 before:left-0 before:h-[2px] before:w-full before:bg-primary',
                   character === ' ' && 'mr-[0.18em]',
                   character === '\n' && 'block h-4 w-full',
                 )}
@@ -240,8 +236,8 @@ export function TypingTestClient({
             </div>
 
             <div className="flex flex-wrap items-center gap-2">
-              <Button type="button" variant="ghost" size="sm" onClick={focusTypingArea}>聚焦输入</Button>
-              <Button type="button" size="sm" onClick={() => void submitAttempt()} disabled={submitting}>
+              <Button type="button" variant="ghost" size="sm" onMouseDown={(event) => event.preventDefault()} onClick={focusTypingArea}>聚焦输入</Button>
+              <Button type="button" size="sm" onMouseDown={(event) => event.preventDefault()} onClick={() => void submitAttempt()} disabled={submitting}>
                 {submitting ? '提交中…' : '提交成绩'}
               </Button>
             </div>
