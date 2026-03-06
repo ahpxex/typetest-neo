@@ -18,25 +18,77 @@ type TypingTestClientProps = {
   startedAt: string;
 };
 
-function getVisibleRange(referenceChars: string[], currentCharIndex: number) {
-  const total = referenceChars.length;
+type LineSegment = {
+  text: string;
+  start: number;
+  end: number;
+};
 
-  if (total <= 900) {
-    return { start: 0, end: total };
+const VISIBLE_LINE_COUNT = 4;
+const ESTIMATED_GLYPH_WIDTH = 19;
+
+function buildVisibleLines(referenceChars: string[], maxCharsPerLine: number) {
+  const safeWidth = Math.max(12, maxCharsPerLine);
+  const lines: LineSegment[] = [];
+
+  let index = 0;
+
+  while (index < referenceChars.length) {
+    const lineStart = index;
+    let lineLength = 0;
+    let lastBreak = -1;
+
+    while (index < referenceChars.length) {
+      const character = referenceChars[index];
+
+      if (character === '\n') {
+        break;
+      }
+
+      lineLength += 1;
+      if (character === ' ') {
+        lastBreak = index;
+      }
+
+      if (lineLength > safeWidth) {
+        if (lastBreak >= lineStart) {
+          index = lastBreak + 1;
+        }
+        break;
+      }
+
+      index += 1;
+    }
+
+    if (index === lineStart) {
+      lines.push({ text: '', start: lineStart, end: lineStart });
+      index += 1;
+      continue;
+    }
+
+    const lineEnd = Math.min(index, referenceChars.length);
+    const lineText = referenceChars.slice(lineStart, lineEnd).join('').replace(/\s+$/g, '');
+    lines.push({ text: lineText, start: lineStart, end: lineEnd });
+
+    if (referenceChars[index] === '\n') {
+      index += 1;
+    }
   }
 
-  let start = Math.max(0, currentCharIndex - 220);
-  let end = Math.min(total, currentCharIndex + 520);
+  return lines.length > 0 ? lines : [{ text: '', start: 0, end: 0 }];
+}
 
-  while (start > 0 && referenceChars[start - 1] !== ' ' && referenceChars[start - 1] !== '\n') {
-    start -= 1;
+function getCurrentLineIndex(lines: LineSegment[], currentCharIndex: number) {
+  const resolvedIndex = lines.findIndex((line, index) => {
+    const nextLineStart = lines[index + 1]?.start ?? Number.POSITIVE_INFINITY;
+    return currentCharIndex >= line.start && currentCharIndex < nextLineStart;
+  });
+
+  if (resolvedIndex >= 0) {
+    return resolvedIndex;
   }
 
-  while (end < total && referenceChars[end] !== ' ' && referenceChars[end] !== '\n') {
-    end += 1;
-  }
-
-  return { start, end };
+  return Math.max(lines.length - 1, 0);
 }
 
 export function TypingTestClient({
@@ -51,6 +103,7 @@ export function TypingTestClient({
   const startedAtMs = new Date(startedAt).getTime();
   const submitLockRef = useRef(false);
   const hiddenInputRef = useRef<HTMLTextAreaElement | null>(null);
+  const containerRef = useRef<HTMLDivElement | null>(null);
   const saveTimerRef = useRef<number | null>(null);
   const [typedText, setTypedText] = useState('');
   const [backspaceCount, setBackspaceCount] = useState(0);
@@ -59,6 +112,7 @@ export function TypingTestClient({
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [isFocused, setIsFocused] = useState(false);
+  const [containerWidth, setContainerWidth] = useState(960);
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -99,6 +153,23 @@ export function TypingTestClient({
     hiddenInputRef.current?.focus();
   }, []);
 
+  useEffect(() => {
+    if (!containerRef.current) {
+      return;
+    }
+
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (entry) {
+        setContainerWidth(entry.contentRect.width);
+      }
+    });
+
+    observer.observe(containerRef.current);
+
+    return () => observer.disconnect();
+  }, []);
+
   const elapsedSeconds = Math.max(0, Math.min(durationSeconds, Math.floor((nowMs - startedAtMs) / 1000)));
   const remainingSeconds = Math.max(0, durationSeconds - elapsedSeconds);
 
@@ -118,13 +189,21 @@ export function TypingTestClient({
   const referenceChars = useMemo(() => Array.from(referenceText), [referenceText]);
   const typedChars = useMemo(() => Array.from(typedText), [typedText]);
   const currentCharIndex = Math.min(typedChars.length, Math.max(referenceChars.length - 1, 0));
-  const visibleRange = useMemo(
-    () => getVisibleRange(referenceChars, currentCharIndex),
-    [currentCharIndex, referenceChars],
+  const estimatedCharsPerLine = Math.floor((containerWidth - 24) / ESTIMATED_GLYPH_WIDTH);
+
+  const lines = useMemo(
+    () => buildVisibleLines(referenceChars, estimatedCharsPerLine),
+    [estimatedCharsPerLine, referenceChars],
   );
-  const visibleChars = useMemo(
-    () => referenceChars.slice(visibleRange.start, visibleRange.end),
-    [referenceChars, visibleRange.end, visibleRange.start],
+
+  const currentLineIndex = useMemo(
+    () => getCurrentLineIndex(lines, currentCharIndex),
+    [currentCharIndex, lines],
+  );
+
+  const visibleLines = useMemo(
+    () => lines.slice(currentLineIndex, currentLineIndex + VISIBLE_LINE_COUNT),
+    [currentLineIndex, lines],
   );
 
   const submitAttempt = useCallback(async () => {
@@ -185,22 +264,20 @@ export function TypingTestClient({
   }
 
   return (
-    <div className="relative pb-28 md:pb-32">
-      <div className="mb-4 flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
+    <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden pb-24 md:pb-28">
+      <div className="mb-3 flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
         <Badge variant="outline">{campaignName}</Badge>
         <span>{articleTitle}</span>
         <span>自动保存已开启</span>
       </div>
 
       <div
+        ref={containerRef}
         onMouseDown={(event) => {
           event.preventDefault();
           focusTypingArea();
         }}
-        className={cn(
-          'group relative min-h-[420px] cursor-text rounded-[2rem] border px-6 py-8 transition-colors md:px-10 md:py-10',
-          isFocused ? 'border-primary/40 bg-card shadow-sm' : 'border-border bg-card/70',
-        )}
+        className="relative flex min-h-0 flex-1 cursor-text items-center px-2 md:px-4"
       >
         <textarea
           ref={hiddenInputRef}
@@ -221,52 +298,59 @@ export function TypingTestClient({
           autoFocus
         />
 
-        {!isFocused && typedText.length === 0 ? (
-          <div className="pointer-events-none absolute inset-x-0 top-5 flex justify-center">
-            <div className="rounded-full border border-border bg-background/90 px-3 py-1 text-xs text-muted-foreground shadow-sm">
+        <div className="w-full font-mono text-[1.45rem] leading-[1.9] tracking-[0.01em] text-zinc-400/60 md:text-[1.85rem] md:leading-[1.8]">
+          {!isFocused && typedText.length === 0 ? (
+            <div className="mb-8 text-center text-xs uppercase tracking-[0.2em] text-muted-foreground">
               点击文本区域开始输入
             </div>
-          </div>
-        ) : null}
+          ) : null}
 
-        <div className="whitespace-pre-wrap break-words text-[1.65rem] leading-[1.95] tracking-[0.01em] text-zinc-400/60 md:text-[2.15rem] md:leading-[1.8]">
-          {visibleRange.start > 0 ? <div className="mb-6 text-xs uppercase tracking-[0.18em] text-muted-foreground">···</div> : null}
-
-          <div>
-            {visibleChars.map((character, visibleIndex) => {
-              const index = visibleRange.start + visibleIndex;
-              const typedCharacter = typedChars[index];
-              const hasTyped = typedCharacter !== undefined;
-              const isActive = index === currentCharIndex;
-              const isCorrect = hasTyped && typedCharacter === character;
-              const isIncorrect = hasTyped && typedCharacter !== character;
+          <div className="space-y-3">
+            {visibleLines.map((line, lineOffset) => {
+              const isCurrentLine = lineOffset === 0;
+              const lineChars = Array.from(line.text);
 
               return (
-                <span
-                  key={`${index}-${character}`}
+                <div
+                  key={`${line.start}-${line.end}`}
                   className={cn(
-                    'relative transition-colors',
-                    isCorrect && 'text-foreground',
-                    isIncorrect && 'bg-destructive/15 text-destructive',
-                    isActive && 'bg-primary/12 text-foreground before:absolute before:bottom-0 before:left-0 before:h-[2px] before:w-full before:bg-primary',
-                    character === ' ' && 'mr-[0.12em]',
-                    character === '\n' && 'block h-4 w-full',
+                    'min-h-[3.2rem] whitespace-pre-wrap break-words',
+                    !isCurrentLine && 'opacity-65',
                   )}
                 >
-                  {character === '\n' ? '' : character}
-                </span>
+                  {lineChars.map((character, charIndex) => {
+                    const absoluteIndex = line.start + charIndex;
+                    const typedCharacter = typedChars[absoluteIndex];
+                    const hasTyped = typedCharacter !== undefined;
+                    const isActive = absoluteIndex === currentCharIndex;
+                    const isCorrect = hasTyped && typedCharacter === character;
+                    const isIncorrect = hasTyped && typedCharacter !== character;
+
+                    return (
+                      <span
+                        key={`${absoluteIndex}-${character}`}
+                        className={cn(
+                          'relative transition-colors',
+                          isCorrect && 'text-foreground',
+                          isIncorrect && 'bg-destructive/15 text-destructive',
+                          isActive && 'bg-primary/12 text-foreground before:absolute before:bottom-0 before:left-0 before:h-[2px] before:w-full before:bg-primary',
+                        )}
+                      >
+                        {character}
+                      </span>
+                    );
+                  })}
+                </div>
               );
             })}
           </div>
-
-          {visibleRange.end < referenceChars.length ? <div className="mt-6 text-xs uppercase tracking-[0.18em] text-muted-foreground">···</div> : null}
         </div>
       </div>
 
       {error ? <p className="mt-3 text-sm text-destructive">{error}</p> : null}
 
-      <div className="pointer-events-none fixed inset-x-0 bottom-4 z-20 flex justify-center px-4">
-        <div className="pointer-events-auto w-full max-w-6xl rounded-full border border-border bg-background/90 px-4 py-3 shadow-lg backdrop-blur md:px-5">
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 flex justify-center px-2 md:px-4">
+        <div className="pointer-events-auto w-full rounded-full border border-border bg-background/92 px-4 py-3 shadow-lg backdrop-blur md:px-5">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex flex-wrap items-center gap-2 md:gap-3">
               <FloatingMetric label="time" value={formatDurationSeconds(remainingSeconds)} accent />
