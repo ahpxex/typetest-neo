@@ -7,9 +7,11 @@ type AdminShellProps = {
 
 export function AdminShell({ adminName, children }: AdminShellProps) {
   return (
-    <div className="min-h-screen bg-background text-foreground">
+    <div className="flex h-screen flex-col overflow-hidden bg-background text-foreground">
       <AdminTopNav adminName={adminName} />
-      <main className="mx-auto max-w-7xl px-4 py-6 md:px-6">{children}</main>
+      <main className="mx-auto flex min-h-0 w-full max-w-7xl flex-1 overflow-hidden px-4 py-4 md:px-6 md:py-5">
+        {children}
+      </main>
     </div>
   )
 }

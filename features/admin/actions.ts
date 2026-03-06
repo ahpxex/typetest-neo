@@ -12,7 +12,6 @@ import {
   campaignArticles,
   campaignCurrentArticles,
   campaigns,
-  classGroups,
   students,
 } from '@/db/schema';
 import { slugify } from '@/lib/format';
@@ -29,14 +28,6 @@ function redirectWithNotice(path: string, key: 'success' | 'error', message: str
   redirect(`${target.pathname}${target.search}`);
 }
 
-const classGroupSchema = z.object({
-  gradeYear: z.coerce.number().int().min(2000),
-  department: z.string().trim().min(1),
-  major: z.string().trim().min(1),
-  name: z.string().trim().min(1),
-  code: z.string().trim().min(1),
-});
-
 const studentSchema = z.object({
   studentNo: z.string().trim().min(1),
   name: z.string().trim().min(1),
@@ -45,7 +36,6 @@ const studentSchema = z.object({
     .trim()
     .email()
     .refine((value) => value.toLowerCase().endsWith('@ucass.edu.cn'), '校园邮箱必须以 @ucass.edu.cn 结尾'),
-  classGroupId: z.coerce.number().int().positive().optional(),
   notes: z.string().trim().optional(),
 });
 
@@ -79,44 +69,12 @@ const campaignSchema = z.object({
 
 const attemptStatusSchema = z.enum(['submitted', 'invalidated']);
 
-export async function createClassGroupAction(formData: FormData) {
-  const redirectTo = getRedirectTarget(formData, '/admin/classes');
-  const parsed = classGroupSchema.safeParse({
-    gradeYear: formData.get('gradeYear'),
-    department: formData.get('department'),
-    major: formData.get('major'),
-    name: formData.get('name'),
-    code: formData.get('code'),
-  });
-
-  if (!parsed.success) {
-    redirectWithNotice(redirectTo, 'error', parsed.error.issues[0]?.message ?? '班级信息不完整');
-  }
-
-  const data = parsed.data;
-
-  await db.insert(classGroups).values(data).onConflictDoUpdate({
-    target: classGroups.code,
-    set: {
-      gradeYear: data.gradeYear,
-      department: data.department,
-      major: data.major,
-      name: data.name,
-      updatedAt: new Date(),
-    },
-  });
-
-  revalidatePath('/admin/classes');
-  redirectWithNotice(redirectTo, 'success', '班级已保存');
-}
-
 export async function createStudentAction(formData: FormData) {
   const redirectTo = getRedirectTarget(formData, '/admin/students');
   const parsed = studentSchema.safeParse({
     studentNo: formData.get('studentNo'),
     name: formData.get('name'),
     campusEmail: formData.get('campusEmail'),
-    classGroupId: formData.get('classGroupId') === 'none' ? undefined : formData.get('classGroupId') || undefined,
     notes: formData.get('notes') || undefined,
   });
 
@@ -130,7 +88,7 @@ export async function createStudentAction(formData: FormData) {
     studentNo: data.studentNo,
     name: data.name,
     campusEmail: data.campusEmail.toLowerCase(),
-    classGroupId: data.classGroupId ?? null,
+    classGroupId: null,
     notes: data.notes ?? null,
     status: 'active',
   }).onConflictDoUpdate({
@@ -138,7 +96,7 @@ export async function createStudentAction(formData: FormData) {
     set: {
       name: data.name,
       campusEmail: data.campusEmail.toLowerCase(),
-      classGroupId: data.classGroupId ?? null,
+      classGroupId: null,
       notes: data.notes ?? null,
       updatedAt: new Date(),
     },
@@ -156,29 +114,24 @@ export async function importStudentsCsvAction(formData: FormData) {
     redirectWithNotice(redirectTo, 'error', '请先粘贴 CSV 内容');
   }
 
-  const classGroupRows = await db.select({
-    id: classGroups.id,
-    code: classGroups.code,
-  }).from(classGroups);
-
-  const classGroupMap = new Map(classGroupRows.map((row) => [row.code, row.id]));
   const lines = csvText.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-
   const header = lines[0]?.toLowerCase();
-  const dataLines = header === 'student_no,name,class_code,campus_email' ? lines.slice(1) : lines;
+  const hasHeader = header === 'student_no,name,campus_email' || header === 'student_no,name,class_code,campus_email';
+  const dataLines = hasHeader ? lines.slice(1) : lines;
 
   if (dataLines.length === 0) {
     redirectWithNotice(redirectTo, 'error', 'CSV 内容为空');
   }
 
   for (const line of dataLines) {
-    const [studentNo = '', name = '', classCode = '', campusEmail = ''] = line.split(',').map((part) => part.trim());
+    const parts = line.split(',').map((part) => part.trim());
+    const [studentNo = '', name = '', third = '', fourth = ''] = parts;
+    const campusEmail = parts.length >= 4 ? fourth : third;
 
     const parsed = studentSchema.safeParse({
       studentNo,
       name,
       campusEmail,
-      classGroupId: classCode ? classGroupMap.get(classCode) : undefined,
       notes: undefined,
     });
 
@@ -192,7 +145,7 @@ export async function importStudentsCsvAction(formData: FormData) {
       studentNo: data.studentNo,
       name: data.name,
       campusEmail: data.campusEmail.toLowerCase(),
-      classGroupId: data.classGroupId ?? null,
+      classGroupId: null,
       notes: null,
       status: 'active',
     }).onConflictDoUpdate({
@@ -200,7 +153,8 @@ export async function importStudentsCsvAction(formData: FormData) {
       set: {
         name: data.name,
         campusEmail: data.campusEmail.toLowerCase(),
-        classGroupId: data.classGroupId ?? null,
+        classGroupId: null,
+        notes: null,
         updatedAt: new Date(),
       },
     });
@@ -304,7 +258,7 @@ export async function saveCampaignAction(formData: FormData) {
     ? articleIdsFromForm
     : data.currentArticleId
       ? [data.currentArticleId]
-      : []
+      : [];
 
   const values = {
     name: data.name,
