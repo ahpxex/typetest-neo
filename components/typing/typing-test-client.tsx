@@ -27,14 +27,13 @@ type LineSegment = {
 type TypingViewportProps = {
   articleTitle: string;
   campaignName: string;
-  typedText: string;
+  renderedText: string;
   isFocused: boolean;
-  referenceChars: string[];
   typedChars: string[];
   currentCharIndex: number;
   visibleLines: LineSegment[];
   hiddenInputRef: React.RefObject<HTMLTextAreaElement | null>;
-  onChange: (value: string) => void;
+  onInputValue: (value: string) => void;
   onBackspace: () => void;
   onPaste: () => void;
   onFocusChange: (focused: boolean) => void;
@@ -123,14 +122,13 @@ function getCurrentLineIndex(lines: LineSegment[], currentCharIndex: number) {
 const TypingViewport = memo(function TypingViewport({
   articleTitle,
   campaignName,
-  typedText,
+  renderedText,
   isFocused,
-  referenceChars,
   typedChars,
   currentCharIndex,
   visibleLines,
   hiddenInputRef,
-  onChange,
+  onInputValue,
   onBackspace,
   onPaste,
   onFocusChange,
@@ -153,8 +151,8 @@ const TypingViewport = memo(function TypingViewport({
       >
         <textarea
           ref={hiddenInputRef}
-          value={typedText}
-          onChange={(event) => onChange(event.target.value)}
+          defaultValue={renderedText}
+          onChange={(event) => onInputValue(event.target.value)}
           onFocus={() => onFocusChange(true)}
           onBlur={() => onFocusChange(false)}
           onPaste={onPaste}
@@ -171,7 +169,7 @@ const TypingViewport = memo(function TypingViewport({
         />
 
         <div className="w-full font-mono text-[1.45rem] leading-[1.9] tracking-[0.01em] text-zinc-400/60 md:text-[1.85rem] md:leading-[1.8]">
-          {!isFocused && typedText.length === 0 ? (
+          {!isFocused && renderedText.length === 0 ? (
             <div className="mb-8 text-center text-xs uppercase tracking-[0.2em] text-muted-foreground">
               点击文本区域开始输入
             </div>
@@ -202,7 +200,7 @@ const TypingViewport = memo(function TypingViewport({
                       <span
                         key={`${absoluteIndex}-${character}`}
                         className={cn(
-                          'relative transition-colors',
+                          'relative',
                           isCorrect && 'text-foreground',
                           isIncorrect && 'bg-destructive/15 text-destructive',
                           isActive && 'bg-primary/12 text-foreground before:absolute before:bottom-0 before:left-0 before:h-[2px] before:w-full before:bg-primary',
@@ -272,7 +270,9 @@ export function TypingTestClient({
   const hiddenInputRef = useRef<HTMLTextAreaElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const saveTimerRef = useRef<number | null>(null);
-  const [typedText, setTypedText] = useState('');
+  const frameRef = useRef<number | null>(null);
+  const typedTextRef = useRef('');
+  const [renderedText, setRenderedText] = useState('');
   const [backspaceCount, setBackspaceCount] = useState(0);
   const [pasteCount, setPasteCount] = useState(0);
   const [nowMs, setNowMs] = useState(Date.now());
@@ -291,10 +291,12 @@ export function TypingTestClient({
 
   useEffect(() => {
     const storageKey = `typing-attempt-${attemptId}`;
-    const saved = window.localStorage.getItem(storageKey);
+    const saved = window.localStorage.getItem(storageKey) ?? '';
+    typedTextRef.current = saved;
+    setRenderedText(saved);
 
-    if (saved) {
-      setTypedText(saved);
+    if (hiddenInputRef.current) {
+      hiddenInputRef.current.value = saved;
     }
   }, [attemptId]);
 
@@ -306,7 +308,7 @@ export function TypingTestClient({
     }
 
     saveTimerRef.current = window.setTimeout(() => {
-      window.localStorage.setItem(storageKey, typedText);
+      window.localStorage.setItem(storageKey, typedTextRef.current);
     }, 250);
 
     return () => {
@@ -314,7 +316,7 @@ export function TypingTestClient({
         window.clearTimeout(saveTimerRef.current);
       }
     };
-  }, [attemptId, typedText]);
+  }, [attemptId, renderedText]);
 
   useEffect(() => {
     hiddenInputRef.current?.focus();
@@ -337,11 +339,19 @@ export function TypingTestClient({
     return () => observer.disconnect();
   }, []);
 
+  useEffect(() => {
+    return () => {
+      if (frameRef.current) {
+        window.cancelAnimationFrame(frameRef.current);
+      }
+    };
+  }, []);
+
   const elapsedSeconds = Math.max(0, Math.min(durationSeconds, Math.floor((nowMs - startedAtMs) / 1000)));
   const remainingSeconds = Math.max(0, durationSeconds - elapsedSeconds);
 
   const normalizedReferenceText = useMemo(() => normalizeTypingText(referenceText), [referenceText]);
-  const normalizedTypedText = useMemo(() => normalizeTypingText(typedText), [typedText]);
+  const normalizedTypedText = useMemo(() => normalizeTypingText(renderedText), [renderedText]);
 
   const metrics = useMemo(
     () =>
@@ -354,7 +364,7 @@ export function TypingTestClient({
   );
 
   const referenceChars = useMemo(() => Array.from(referenceText), [referenceText]);
-  const typedChars = useMemo(() => Array.from(typedText), [typedText]);
+  const typedChars = useMemo(() => Array.from(renderedText), [renderedText]);
   const currentCharIndex = Math.min(typedChars.length, Math.max(referenceChars.length - 1, 0));
   const estimatedCharsPerLine = Math.floor((containerWidth - 24) / ESTIMATED_GLYPH_WIDTH);
 
@@ -389,7 +399,7 @@ export function TypingTestClient({
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          typedTextRaw: typedText,
+          typedTextRaw: typedTextRef.current,
           durationSecondsUsed: elapsedSeconds,
           backspaceCount,
           pasteCount,
@@ -418,7 +428,7 @@ export function TypingTestClient({
       setSubmitting(false);
       setError(submitError instanceof Error ? submitError.message : '成绩提交失败');
     }
-  }, [attemptId, backspaceCount, elapsedSeconds, pasteCount, router, typedText]);
+  }, [attemptId, backspaceCount, elapsedSeconds, pasteCount, router]);
 
   useEffect(() => {
     if (remainingSeconds === 0 && !submitLockRef.current) {
@@ -438,19 +448,31 @@ export function TypingTestClient({
     setPasteCount((value) => value + 1);
   }, []);
 
+  const handleInputValue = useCallback((value: string) => {
+    typedTextRef.current = value;
+
+    if (frameRef.current !== null) {
+      return;
+    }
+
+    frameRef.current = window.requestAnimationFrame(() => {
+      frameRef.current = null;
+      setRenderedText(typedTextRef.current);
+    });
+  }, []);
+
   return (
     <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden pb-24 md:pb-28">
       <TypingViewport
         articleTitle={articleTitle}
         campaignName={campaignName}
-        typedText={typedText}
+        renderedText={renderedText}
         isFocused={isFocused}
-        referenceChars={referenceChars}
         typedChars={typedChars}
         currentCharIndex={currentCharIndex}
         visibleLines={visibleLines}
         hiddenInputRef={hiddenInputRef}
-        onChange={setTypedText}
+        onInputValue={handleInputValue}
         onBackspace={handleBackspace}
         onPaste={handlePaste}
         onFocusChange={setIsFocused}
