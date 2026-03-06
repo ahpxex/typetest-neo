@@ -233,24 +233,17 @@ const TypingStatsBar = memo(function TypingStatsBar({
 }: TypingStatsBarProps) {
   return (
     <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 flex justify-center px-2 md:px-4">
-      <div className="pointer-events-auto w-full rounded-full border border-border bg-background/92 px-4 py-3 shadow-lg backdrop-blur md:px-5">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex flex-wrap items-center gap-2 md:gap-3">
-            <FloatingMetric label="剩余时间" value={formatDurationSeconds(remainingSeconds)} accent />
-            <FloatingMetric label="速度" value={`${scoreKpm}`} />
-            <FloatingMetric label="正确率" value={`${accuracy}%`} />
-            <FloatingMetric label="进度" value={`${progress}%`} />
-            <FloatingMetric label="错误" value={`${charCountError}`} />
-            <FloatingMetric label="退格" value={`${backspaceCount}`} />
-            <FloatingMetric label="粘贴" value={`${pasteCount}`} />
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2">
-            <Button type="button" size="sm" className="rounded-full px-4 shadow-none" onMouseDown={(event) => event.preventDefault()} onClick={onSubmit} disabled={submitting}>
-              {submitting ? '提交中…' : '提交成绩'}
-            </Button>
-          </div>
-        </div>
+      <div className="pointer-events-auto inline-flex max-w-[min(100%,1100px)] flex-wrap items-center justify-center gap-2 rounded-full border border-border bg-background/92 px-3 py-3 shadow-lg backdrop-blur md:gap-3 md:px-4">
+        <FloatingMetric label="剩余时间" value={formatDurationSeconds(remainingSeconds)} accent />
+        <FloatingMetric label="速度" value={`${scoreKpm}`} />
+        <FloatingMetric label="正确率" value={`${accuracy}%`} />
+        <FloatingMetric label="进度" value={`${progress}%`} />
+        <FloatingMetric label="错误" value={`${charCountError}`} />
+        <FloatingMetric label="退格" value={`${backspaceCount}`} />
+        <FloatingMetric label="粘贴" value={`${pasteCount}`} />
+        <Button type="button" size="sm" className="rounded-full px-4 shadow-none" onMouseDown={(event) => event.preventDefault()} onClick={onSubmit} disabled={submitting}>
+          {submitting ? '提交中…' : '提交成绩'}
+        </Button>
       </div>
     </div>
   );
