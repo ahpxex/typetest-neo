@@ -47,7 +47,7 @@ export function calculateTypingMetricsPrepared({
   const charCountTyped = typedChars.length;
   const accuracy = charCountTyped === 0 ? 0 : (charCountCorrect / charCountTyped) * 100;
   const safeDurationSeconds = Math.max(durationSeconds, 1);
-  const scoreKpm = (charCountCorrect / safeDurationSeconds) * 60;
+  const scoreKpm = (charCountTyped / safeDurationSeconds) * 60;
   const progress = referenceChars.length === 0 ? 0 : Math.min(charCountCorrect / referenceChars.length, 1);
 
   return {
