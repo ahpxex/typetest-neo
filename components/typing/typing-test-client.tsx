@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 
 import { Badge } from '@/components/ui/badge';
@@ -22,6 +22,35 @@ type LineSegment = {
   text: string;
   start: number;
   end: number;
+};
+
+type TypingViewportProps = {
+  articleTitle: string;
+  campaignName: string;
+  typedText: string;
+  isFocused: boolean;
+  referenceChars: string[];
+  typedChars: string[];
+  currentCharIndex: number;
+  visibleLines: LineSegment[];
+  hiddenInputRef: React.RefObject<HTMLTextAreaElement | null>;
+  onChange: (value: string) => void;
+  onBackspace: () => void;
+  onPaste: () => void;
+  onFocusChange: (focused: boolean) => void;
+  onFocusTypingArea: () => void;
+};
+
+type TypingStatsBarProps = {
+  remainingSeconds: number;
+  scoreKpm: number;
+  accuracy: number;
+  progress: number;
+  charCountError: number;
+  backspaceCount: number;
+  pasteCount: number;
+  submitting: boolean;
+  onSubmit: () => void;
 };
 
 const VISIBLE_LINE_COUNT = 4;
@@ -90,6 +119,144 @@ function getCurrentLineIndex(lines: LineSegment[], currentCharIndex: number) {
 
   return Math.max(lines.length - 1, 0);
 }
+
+const TypingViewport = memo(function TypingViewport({
+  articleTitle,
+  campaignName,
+  typedText,
+  isFocused,
+  referenceChars,
+  typedChars,
+  currentCharIndex,
+  visibleLines,
+  hiddenInputRef,
+  onChange,
+  onBackspace,
+  onPaste,
+  onFocusChange,
+  onFocusTypingArea,
+}: TypingViewportProps) {
+  return (
+    <>
+      <div className="mb-4 flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
+        <Badge variant="outline">{campaignName}</Badge>
+        <span>{articleTitle}</span>
+        <span>自动保存已开启</span>
+      </div>
+
+      <div
+        onMouseDown={(event) => {
+          event.preventDefault();
+          onFocusTypingArea();
+        }}
+        className="relative flex min-h-0 flex-1 cursor-text items-center px-2 md:px-4"
+      >
+        <textarea
+          ref={hiddenInputRef}
+          value={typedText}
+          onChange={(event) => onChange(event.target.value)}
+          onFocus={() => onFocusChange(true)}
+          onBlur={() => onFocusChange(false)}
+          onPaste={onPaste}
+          onKeyDown={(event) => {
+            if (event.key === 'Backspace') {
+              onBackspace();
+            }
+          }}
+          className="absolute inset-0 h-full w-full resize-none opacity-0"
+          spellCheck={false}
+          autoCapitalize="off"
+          autoCorrect="off"
+          autoFocus
+        />
+
+        <div className="w-full font-mono text-[1.45rem] leading-[1.9] tracking-[0.01em] text-zinc-400/60 md:text-[1.85rem] md:leading-[1.8]">
+          {!isFocused && typedText.length === 0 ? (
+            <div className="mb-8 text-center text-xs uppercase tracking-[0.2em] text-muted-foreground">
+              点击文本区域开始输入
+            </div>
+          ) : null}
+
+          <div className="space-y-3">
+            {visibleLines.map((line, lineOffset) => {
+              const isCurrentLine = lineOffset === 0;
+              const lineChars = Array.from(line.text);
+
+              return (
+                <div
+                  key={`${line.start}-${line.end}`}
+                  className={cn(
+                    'min-h-[3.2rem] whitespace-pre-wrap break-words',
+                    !isCurrentLine && 'opacity-65',
+                  )}
+                >
+                  {lineChars.map((character, charIndex) => {
+                    const absoluteIndex = line.start + charIndex;
+                    const typedCharacter = typedChars[absoluteIndex];
+                    const hasTyped = typedCharacter !== undefined;
+                    const isActive = absoluteIndex === currentCharIndex;
+                    const isCorrect = hasTyped && typedCharacter === character;
+                    const isIncorrect = hasTyped && typedCharacter !== character;
+
+                    return (
+                      <span
+                        key={`${absoluteIndex}-${character}`}
+                        className={cn(
+                          'relative transition-colors',
+                          isCorrect && 'text-foreground',
+                          isIncorrect && 'bg-destructive/15 text-destructive',
+                          isActive && 'bg-primary/12 text-foreground before:absolute before:bottom-0 before:left-0 before:h-[2px] before:w-full before:bg-primary',
+                        )}
+                      >
+                        {character}
+                      </span>
+                    );
+                  })}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    </>
+  );
+});
+
+const TypingStatsBar = memo(function TypingStatsBar({
+  remainingSeconds,
+  scoreKpm,
+  accuracy,
+  progress,
+  charCountError,
+  backspaceCount,
+  pasteCount,
+  submitting,
+  onSubmit,
+}: TypingStatsBarProps) {
+  return (
+    <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 flex justify-center px-2 md:px-4">
+      <div className="pointer-events-auto w-full rounded-full border border-border bg-background/92 px-4 py-3 shadow-lg backdrop-blur md:px-5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-2 md:gap-3">
+            <FloatingMetric label="剩余时间" value={formatDurationSeconds(remainingSeconds)} accent />
+            <FloatingMetric label="速度" value={`${scoreKpm}`} />
+            <FloatingMetric label="正确率" value={`${accuracy}%`} />
+            <FloatingMetric label="进度" value={`${progress}%`} />
+            <FloatingMetric label="错误" value={`${charCountError}`} />
+            <FloatingMetric label="退格" value={`${backspaceCount}`} />
+            <FloatingMetric label="粘贴" value={`${pasteCount}`} />
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <Button type="button" size="sm" className="rounded-full px-4 shadow-none" onMouseDown={(event) => event.preventDefault()} onClick={onSubmit} disabled={submitting}>
+              {submitting ? '提交中…' : '提交成绩'}
+            </Button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+});
 
 export function TypingTestClient({
   attemptId,
@@ -259,124 +426,50 @@ export function TypingTestClient({
     }
   }, [remainingSeconds, submitAttempt]);
 
-  function focusTypingArea() {
+  const focusTypingArea = useCallback(() => {
     hiddenInputRef.current?.focus();
-  }
+  }, []);
+
+  const handleBackspace = useCallback(() => {
+    setBackspaceCount((value) => value + 1);
+  }, []);
+
+  const handlePaste = useCallback(() => {
+    setPasteCount((value) => value + 1);
+  }, []);
 
   return (
     <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden pb-24 md:pb-28">
-      <div className="mb-3 flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
-        <Badge variant="outline">{campaignName}</Badge>
-        <span>{articleTitle}</span>
-        <span>自动保存已开启</span>
-      </div>
-
-      <div
-        ref={containerRef}
-        onMouseDown={(event) => {
-          event.preventDefault();
-          focusTypingArea();
-        }}
-        className="relative flex min-h-0 flex-1 cursor-text items-center px-2 md:px-4"
-      >
-        <textarea
-          ref={hiddenInputRef}
-          value={typedText}
-          onChange={(event) => setTypedText(event.target.value)}
-          onFocus={() => setIsFocused(true)}
-          onBlur={() => setIsFocused(false)}
-          onPaste={() => setPasteCount((value) => value + 1)}
-          onKeyDown={(event) => {
-            if (event.key === 'Backspace') {
-              setBackspaceCount((value) => value + 1);
-            }
-          }}
-          className="absolute inset-0 h-full w-full resize-none opacity-0"
-          spellCheck={false}
-          autoCapitalize="off"
-          autoCorrect="off"
-          autoFocus
-        />
-
-        <div className="w-full font-mono text-[1.45rem] leading-[1.9] tracking-[0.01em] text-zinc-400/60 md:text-[1.85rem] md:leading-[1.8]">
-          {!isFocused && typedText.length === 0 ? (
-            <div className="mb-8 text-center text-xs uppercase tracking-[0.2em] text-muted-foreground">
-              点击文本区域开始输入
-            </div>
-          ) : null}
-
-          <div className="space-y-3">
-            {visibleLines.map((line, lineOffset) => {
-              const isCurrentLine = lineOffset === 0;
-              const lineChars = Array.from(line.text);
-
-              return (
-                <div
-                  key={`${line.start}-${line.end}`}
-                  className={cn(
-                    'min-h-[3.2rem] whitespace-pre-wrap break-words',
-                    !isCurrentLine && 'opacity-65',
-                  )}
-                >
-                  {lineChars.map((character, charIndex) => {
-                    const absoluteIndex = line.start + charIndex;
-                    const typedCharacter = typedChars[absoluteIndex];
-                    const hasTyped = typedCharacter !== undefined;
-                    const isActive = absoluteIndex === currentCharIndex;
-                    const isCorrect = hasTyped && typedCharacter === character;
-                    const isIncorrect = hasTyped && typedCharacter !== character;
-
-                    return (
-                      <span
-                        key={`${absoluteIndex}-${character}`}
-                        className={cn(
-                          'relative transition-colors',
-                          isCorrect && 'text-foreground',
-                          isIncorrect && 'bg-destructive/15 text-destructive',
-                          isActive && 'bg-primary/12 text-foreground before:absolute before:bottom-0 before:left-0 before:h-[2px] before:w-full before:bg-primary',
-                        )}
-                      >
-                        {character}
-                      </span>
-                    );
-                  })}
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      </div>
+      <TypingViewport
+        articleTitle={articleTitle}
+        campaignName={campaignName}
+        typedText={typedText}
+        isFocused={isFocused}
+        referenceChars={referenceChars}
+        typedChars={typedChars}
+        currentCharIndex={currentCharIndex}
+        visibleLines={visibleLines}
+        hiddenInputRef={hiddenInputRef}
+        onChange={setTypedText}
+        onBackspace={handleBackspace}
+        onPaste={handlePaste}
+        onFocusChange={setIsFocused}
+        onFocusTypingArea={focusTypingArea}
+      />
 
       {error ? <p className="mt-3 text-sm text-destructive">{error}</p> : null}
 
-      <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 flex justify-center px-2 md:px-4">
-        <div className="pointer-events-auto w-full rounded-full border border-border bg-background/92 px-4 py-3 shadow-lg backdrop-blur md:px-5">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="flex flex-wrap items-center gap-2 md:gap-3">
-              <FloatingMetric label="剩余时间" value={formatDurationSeconds(remainingSeconds)} accent />
-              <FloatingMetric label="速度" value={`${metrics.scoreKpm}`} />
-              <FloatingMetric label="正确率" value={`${metrics.accuracy}%`} />
-              <FloatingMetric label="进度" value={`${metrics.progress}%`} />
-              <FloatingMetric label="错误" value={`${metrics.charCountError}`} />
-              <FloatingMetric label="退格" value={`${backspaceCount}`} />
-              <FloatingMetric label="粘贴" value={`${pasteCount}`} />
-            </div>
-
-            <div className="flex flex-wrap items-center gap-2">
-              <Button
-                type="button"
-                size="sm"
-                className="rounded-full px-4 shadow-none"
-                onMouseDown={(event) => event.preventDefault()}
-                onClick={() => void submitAttempt()}
-                disabled={submitting}
-              >
-                {submitting ? '提交中…' : '提交成绩'}
-              </Button>
-            </div>
-          </div>
-        </div>
-      </div>
+      <TypingStatsBar
+        remainingSeconds={remainingSeconds}
+        scoreKpm={metrics.scoreKpm}
+        accuracy={metrics.accuracy}
+        progress={metrics.progress}
+        charCountError={metrics.charCountError}
+        backspaceCount={backspaceCount}
+        pasteCount={pasteCount}
+        submitting={submitting}
+        onSubmit={() => void submitAttempt()}
+      />
     </div>
   );
 }
