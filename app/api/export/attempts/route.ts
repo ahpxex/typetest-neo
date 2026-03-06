@@ -1,0 +1,80 @@
+import { NextResponse } from 'next/server';
+
+import { getCurrentAdmin } from '@/lib/auth/session';
+import { getExportRows } from '@/lib/data/queries';
+import { formatDateTime } from '@/lib/format';
+
+function escapeCsv(value: unknown) {
+  const stringValue = String(value ?? '');
+  if (stringValue.includes(',') || stringValue.includes('"') || stringValue.includes('\n')) {
+    return `"${stringValue.replaceAll('"', '""')}"`;
+  }
+  return stringValue;
+}
+
+export async function GET(request: Request) {
+  const currentAdmin = await getCurrentAdmin();
+
+  if (!currentAdmin) {
+    return NextResponse.json({ error: '管理员未登录。' }, { status: 401 });
+  }
+
+  const { searchParams } = new URL(request.url);
+  const campaignId = Number(searchParams.get('campaignId') ?? 0) || undefined;
+  const rows = await getExportRows(campaignId);
+
+  const headers = [
+    'campaign_name',
+    'student_no',
+    'student_name',
+    'campus_email',
+    'class_name',
+    'class_code',
+    'article_title',
+    'score_kpm',
+    'accuracy',
+    'status',
+    'started_at',
+    'submitted_at',
+    'duration_seconds_used',
+    'backspace_count',
+    'paste_count',
+    'suspicion_flags',
+    'ip_address',
+  ];
+
+  const body = [
+    headers.join(','),
+    ...rows.map((row) =>
+      [
+        row.campaignName,
+        row.studentNo,
+        row.studentName,
+        row.campusEmail,
+        row.className,
+        row.classCode,
+        row.articleTitle,
+        row.scoreKpm,
+        row.accuracy,
+        row.status,
+        formatDateTime(row.startedAt),
+        formatDateTime(row.submittedAt),
+        row.durationSecondsUsed ?? '',
+        row.backspaceCount,
+        row.pasteCount,
+        row.suspicionFlags.join('|'),
+        row.ipAddress ?? '',
+      ]
+        .map(escapeCsv)
+        .join(','),
+    ),
+  ].join('\n');
+
+  return new NextResponse(body, {
+    status: 200,
+    headers: {
+      'Content-Type': 'text/csv; charset=utf-8',
+      'Content-Disposition': `attachment; filename="attempts-${campaignId ?? 'all'}.csv"`,
+    },
+  });
+}

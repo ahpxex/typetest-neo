@@ -1,65 +1,105 @@
-import Image from "next/image";
+import Link from 'next/link';
+import { redirect } from 'next/navigation';
 
-export default function Home() {
+import { Card } from '@/components/ui/card';
+import { StudentLoginForm } from '@/features/auth/student-login-form';
+import { getAnySignedInUser } from '@/lib/auth/guards';
+import { APP_DESCRIPTION, APP_NAME } from '@/lib/env';
+import { formatDurationSeconds } from '@/lib/format';
+import { getActiveCampaign, resolveCurrentArticleForCampaign } from '@/lib/data/queries';
+
+export default async function HomePage() {
+  const currentUser = await getAnySignedInUser();
+
+  if (currentUser?.type === 'admin') {
+    redirect('/admin');
+  }
+
+  if (currentUser?.type === 'student') {
+    redirect('/typing');
+  }
+
+  const activeCampaign = await getActiveCampaign();
+  const currentArticle = activeCampaign
+    ? await resolveCurrentArticleForCampaign(activeCampaign.id)
+    : null;
+
   return (
-    <div className="flex min-h-screen items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex min-h-screen w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
+    <main className="min-h-screen bg-[radial-gradient(circle_at_top,_rgba(24,24,27,0.08),_transparent_50%)] px-4 py-10 md:px-6">
+      <div className="mx-auto grid max-w-6xl gap-6 lg:grid-cols-[1.2fr_0.8fr]">
+        <section className="space-y-6 rounded-[2rem] border border-zinc-200 bg-white p-8 shadow-sm md:p-10">
+          <div className="space-y-4">
+            <p className="text-xs font-semibold uppercase tracking-[0.28em] text-zinc-400">UCASS Typing Platform</p>
+            <h1 className="max-w-2xl text-4xl font-semibold tracking-tight text-zinc-950 md:text-5xl">
+              {APP_NAME}
+            </h1>
+            <p className="max-w-2xl text-base leading-8 text-zinc-600 md:text-lg">{APP_DESCRIPTION}</p>
+          </div>
+
+          <div className="grid gap-4 md:grid-cols-3">
+            <Metric title="定位" value="大一统一测试" description="面向每年新生的统一考试与练习" />
+            <Metric title="入口" value="姓名 + 学号 + 邮箱" description="支持学生端和管理员端双入口" />
+            <Metric title="成绩" value="服务端复算" description="最终结果由服务器统一结算" />
+          </div>
+
+          <Card
+            title="当前场次"
+            description="学生登录后会自动进入当前激活的测试场次"
+            className="border-zinc-900 bg-zinc-900 text-white"
           >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
+            {activeCampaign ? (
+              <div className="space-y-3 text-sm text-zinc-200">
+                <p>
+                  <span className="font-medium text-white">{activeCampaign.name}</span>
+                  <span className="ml-3 text-zinc-400">{activeCampaign.academicYear} / {activeCampaign.term}</span>
+                </p>
+                <p>测试时长：{formatDurationSeconds(activeCampaign.durationSeconds)}</p>
+                <p>文章策略：{activeCampaign.articleStrategy}</p>
+                <p>当前文章：{currentArticle?.title ?? '暂未分配'}</p>
+              </div>
+            ) : (
+              <p className="text-sm text-zinc-300">当前暂无激活场次，请联系管理员在后台发布测试。</p>
+            )}
+          </Card>
+        </section>
+
+        <aside className="space-y-4 rounded-[2rem] border border-zinc-200 bg-white p-8 shadow-sm md:p-10">
+          <div className="space-y-2">
+            <h2 className="text-2xl font-semibold text-zinc-950">学生登录</h2>
+            <p className="text-sm leading-7 text-zinc-500">
+              请使用学校登记的姓名、学号和 `@ucass.edu.cn` 校园邮箱登录系统。
+            </p>
+          </div>
+
+          <StudentLoginForm />
+
+          <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4 text-sm text-zinc-600">
+            如需管理文章、学生和场次，请前往{' '}
+            <Link href="/admin/login" className="font-semibold text-zinc-950 underline underline-offset-4">
+              管理员后台
+            </Link>
+            。
+          </div>
+        </aside>
+      </div>
+    </main>
+  );
+}
+
+function Metric({
+  title,
+  value,
+  description,
+}: {
+  title: string;
+  value: string;
+  description: string;
+}) {
+  return (
+    <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
+      <p className="text-xs font-medium uppercase tracking-[0.18em] text-zinc-400">{title}</p>
+      <p className="mt-3 text-lg font-semibold text-zinc-950">{value}</p>
+      <p className="mt-2 text-sm leading-6 text-zinc-500">{description}</p>
     </div>
   );
 }
