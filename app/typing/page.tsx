@@ -7,7 +7,7 @@ import { StudentPageShell } from '@/components/typing/student-page-shell';
 import { requireStudent } from '@/lib/auth/guards';
 import { getCurrentRotatingArticle, getStudentDashboard, type StudentRecentAttemptSummary } from '@/lib/data/queries';
 import { formatDateTime, formatKpm, formatPercent } from '@/lib/format';
-import { getAttemptModeLabel } from '@/lib/attempt-mode';
+import { getAttemptModeLabel, type AttemptMode } from '@/lib/attempt-mode';
 
 export default async function TypingHomePage() {
   const { student } = await requireStudent();
@@ -39,110 +39,124 @@ export default async function TypingHomePage() {
         </div>
       }
     >
-      <div className="grid min-h-0 flex-1 gap-4 xl:grid-cols-[1.2fr_0.8fr]">
-        <div className="grid min-h-0 gap-4">
-          <div className="grid gap-4 md:grid-cols-2">
-            <Card>
-              <CardHeader>
-                <CardTitle>开始练习</CardTitle>
-                <CardDescription>练习不会进入正式排行榜，可以随时继续。</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="rounded-lg border border-border bg-muted/30 p-4 text-sm text-muted-foreground">
-                  <p>当前文章：{currentArticle?.title ?? '未设置'}</p>
-                  <p className="mt-1">最佳练习成绩：{dashboard.bestPracticeScoreKpm === null ? '—' : `${formatKpm(dashboard.bestPracticeScoreKpm)} · ${formatPercent(dashboard.bestPracticeAccuracy ?? 0)}`}</p>
-                </div>
-                <Button asChild className="w-full">
-                  <Link href="/typing/practice">开始练习</Link>
-                </Button>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle>开始考试</CardTitle>
-                <CardDescription>正式考试成绩会进入排行榜与后台统计。</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="rounded-lg border border-border bg-muted/30 p-4 text-sm text-muted-foreground">
-                  <p>当前文章：{currentArticle?.title ?? '未设置'}</p>
-                  <p className="mt-1">最佳考试成绩：{dashboard.bestExamScoreKpm === null ? '—' : `${formatKpm(dashboard.bestExamScoreKpm)} · ${formatPercent(dashboard.bestExamAccuracy ?? 0)}`}</p>
-                </div>
-                <Button asChild className="w-full">
-                  <Link href="/typing/exam">开始考试</Link>
-                </Button>
-              </CardContent>
-            </Card>
-          </div>
-
-          <div className="grid min-h-0 gap-4 md:grid-cols-2">
-            <AttemptListCard title="最近练习记录" attempts={dashboard.practiceAttempts} />
-            <AttemptListCard title="最近考试记录" attempts={dashboard.examAttempts} />
-          </div>
+      <div className="flex min-h-0 flex-1 overflow-auto">
+        <div className="mx-auto grid w-full max-w-5xl content-start gap-6 py-4 xl:grid-cols-2 xl:items-start">
+          <ModeCard
+          title="练习"
+          description="练习不会进入正式排行榜，可以随时继续。"
+          href="/typing/practice"
+          actionLabel="开始练习"
+          bestLabel="最佳练习成绩"
+          bestScore={dashboard.bestPracticeScoreKpm}
+          bestAccuracy={dashboard.bestPracticeAccuracy}
+          currentArticleTitle={currentArticle?.title ?? '未设置'}
+          attempts={dashboard.practiceAttempts}
+          mode="practice"
+        />
+          <ModeCard
+            title="考试"
+            description="正式考试成绩会进入排行榜与后台统计。"
+            href="/typing/exam"
+            actionLabel="开始考试"
+            bestLabel="最佳考试成绩"
+            bestScore={dashboard.bestExamScoreKpm}
+            bestAccuracy={dashboard.bestExamAccuracy}
+            currentArticleTitle={currentArticle?.title ?? '未设置'}
+            attempts={dashboard.examAttempts}
+            mode="exam"
+          />
         </div>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>当前状态</CardTitle>
-            <CardDescription>登录信息、文章状态与快捷入口。</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4 text-sm text-muted-foreground">
-            <div className="rounded-lg border border-border bg-muted/30 p-4">
-              <p>姓名：<span className="font-medium text-foreground">{dashboard.studentName}</span></p>
-              <p className="mt-1">学号：<span className="font-medium text-foreground">{dashboard.studentNo}</span></p>
-              <p className="mt-1">校园邮箱：<span className="font-medium text-foreground">{dashboard.campusEmail}</span></p>
-            </div>
-            <div className="rounded-lg border border-border bg-muted/30 p-4">
-              <p>当前轮换文章：<span className="font-medium text-foreground">{currentArticle?.title ?? '未设置'}</span></p>
-              <p className="mt-1">排行榜仅统计正式考试成绩。</p>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <Button asChild variant="outline"><Link href="/ranking">查看排行榜</Link></Button>
-              <Button asChild variant="outline"><Link href="/typing/practice">继续练习</Link></Button>
-              <Button asChild variant="outline"><Link href="/typing/exam">进入考试</Link></Button>
-            </div>
-          </CardContent>
-        </Card>
       </div>
     </StudentPageShell>
   );
 }
 
-function AttemptListCard({ title, attempts }: { title: string; attempts: StudentRecentAttemptSummary[] }) {
+type ModeCardProps = {
+  title: string;
+  description: string;
+  href: string;
+  actionLabel: string;
+  bestLabel: string;
+  bestScore: number | null;
+  bestAccuracy: number | null;
+  currentArticleTitle: string;
+  attempts: StudentRecentAttemptSummary[];
+  mode: AttemptMode;
+};
+
+function ModeCard({
+  title,
+  description,
+  href,
+  actionLabel,
+  bestLabel,
+  bestScore,
+  bestAccuracy,
+  currentArticleTitle,
+  attempts,
+  mode,
+}: ModeCardProps) {
   return (
-    <Card className="min-h-0">
+    <Card className="w-full self-start overflow-hidden shadow-sm">
       <CardHeader>
-        <CardTitle>{title}</CardTitle>
-        <CardDescription>{attempts.length === 0 ? '还没有记录。' : '点击可以查看成绩详情。'}</CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-3 overflow-auto">
-        {attempts.length === 0 ? (
-          <div className="rounded-lg border border-dashed border-border px-4 py-8 text-center text-sm text-muted-foreground">
-            暂无记录
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <CardTitle>{title}</CardTitle>
+            <CardDescription className="mt-1">{description}</CardDescription>
           </div>
-        ) : (
-          attempts.map((attempt) => (
-            <Link
-              key={attempt.attemptId}
-              href={`/result/${attempt.attemptId}`}
-              className="block rounded-lg border border-border bg-muted/20 p-4 transition-colors hover:bg-muted/40"
-            >
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div>
-                  <p className="font-medium">{attempt.articleTitle}</p>
-                  <p className="mt-1 text-xs text-muted-foreground">{formatDateTime(attempt.submittedAt ?? attempt.startedAt)}</p>
-                </div>
-                <Badge variant={attempt.mode === 'exam' ? 'secondary' : 'outline'}>{getAttemptModeLabel(attempt.mode)}</Badge>
-              </div>
-              <div className="mt-3 flex flex-wrap gap-3 text-sm text-muted-foreground">
-                <span>状态：{attempt.status}</span>
-                <span>速度：{attempt.status === 'submitted' ? formatKpm(attempt.scoreKpm) : '—'}</span>
-                <span>正确率：{attempt.status === 'submitted' ? formatPercent(attempt.accuracy) : '—'}</span>
-              </div>
-            </Link>
-          ))
-        )}
+          <Badge variant={mode === 'exam' ? 'secondary' : 'outline'}>{getAttemptModeLabel(mode)}</Badge>
+        </div>
+      </CardHeader>
+      <CardContent className="flex min-h-0 flex-1 flex-col gap-4">
+        <div className="rounded-lg border border-border bg-muted/30 p-4 text-sm text-muted-foreground">
+          <p>当前文章：{currentArticleTitle}</p>
+          <p className="mt-1">
+            {bestLabel}：{bestScore === null ? '—' : `${formatKpm(bestScore)} · ${formatPercent(bestAccuracy ?? 0)}`}
+          </p>
+        </div>
+
+        <Button asChild className="w-full shrink-0">
+          <Link href={href}>{actionLabel}</Link>
+        </Button>
+
+        <div className="min-h-0 flex-1 space-y-3 overflow-auto">
+          <div>
+            <p className="font-medium">最近记录</p>
+            <p className="text-sm text-muted-foreground">
+              {attempts.length === 0 ? '还没有记录。' : '点击可以查看成绩详情。'}
+            </p>
+          </div>
+          {attempts.length === 0 ? (
+            <div className="rounded-lg border border-dashed border-border px-4 py-8 text-center text-sm text-muted-foreground">
+              暂无记录
+            </div>
+          ) : (
+            attempts.map((attempt) => <AttemptRecord key={attempt.attemptId} attempt={attempt} />)
+          )}
+        </div>
       </CardContent>
     </Card>
+  );
+}
+
+function AttemptRecord({ attempt }: { attempt: StudentRecentAttemptSummary }) {
+  return (
+    <Link
+      href={`/result/${attempt.attemptId}`}
+      className="block rounded-lg border border-border bg-muted/20 p-4 transition-colors hover:bg-muted/40"
+    >
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <p className="font-medium">{attempt.articleTitle}</p>
+          <p className="mt-1 text-xs text-muted-foreground">{formatDateTime(attempt.submittedAt ?? attempt.startedAt)}</p>
+        </div>
+        <Badge variant={attempt.mode === 'exam' ? 'secondary' : 'outline'}>{getAttemptModeLabel(attempt.mode)}</Badge>
+      </div>
+      <div className="mt-3 flex flex-wrap gap-3 text-sm text-muted-foreground">
+        <span>状态：{attempt.status}</span>
+        <span>速度：{attempt.status === 'submitted' ? formatKpm(attempt.scoreKpm) : '—'}</span>
+        <span>正确率：{attempt.status === 'submitted' ? formatPercent(attempt.accuracy) : '—'}</span>
+      </div>
+    </Link>
   );
 }
