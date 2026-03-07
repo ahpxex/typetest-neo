@@ -1,7 +1,8 @@
 import type { LineSegment } from '@/components/typing/types';
 
 export const VISIBLE_LINE_COUNT = 4;
-export const ESTIMATED_GLYPH_WIDTH = 14;
+export const TEXT_VIEWPORT_MAX_WIDTH = 1400;
+export const ESTIMATED_GLYPH_WIDTH = 16;
 
 export function buildVisibleLines(referenceChars: string[], maxCharsPerLine: number) {
   const safeWidth = Math.max(12, maxCharsPerLine);

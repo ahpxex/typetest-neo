@@ -13,6 +13,7 @@ export const TypingViewport = memo(function TypingViewport({
   currentCharIndex,
   visibleLines,
   hiddenInputRef,
+  textMeasureRef,
   onInputValue,
   onBackspace,
   onPaste,
@@ -52,7 +53,10 @@ export const TypingViewport = memo(function TypingViewport({
           autoFocus
         />
 
-        <div className="mx-auto w-full max-w-[1400px] text-center font-mono text-[1.18rem] leading-[1.95] tracking-[0.01em] text-zinc-400/60 md:text-[1.55rem] md:leading-[1.85]">
+        <div
+          ref={textMeasureRef}
+          className="mx-auto w-full max-w-[1400px] text-center font-mono text-[1.18rem] leading-[1.95] tracking-[0.01em] text-zinc-400/60 md:text-[1.55rem] md:leading-[1.85]"
+        >
           {!isFocused && renderedText.length === 0 ? (
             <div className="mb-8 text-center text-xs uppercase tracking-[0.2em] text-muted-foreground">
               点击文本区域开始输入
@@ -68,7 +72,7 @@ export const TypingViewport = memo(function TypingViewport({
                 <div
                   key={`${line.start}-${line.end}`}
                   className={cn(
-                    'mx-auto min-h-[3.2rem] max-w-full whitespace-pre-wrap break-words text-center',
+                    'mx-auto min-h-[3.2rem] max-w-full whitespace-pre-wrap text-center',
                     !isCurrentLine && 'opacity-65',
                   )}
                 >

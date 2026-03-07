@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 
 import { calculateStrictAccuracy, calculateTypingMetricsPrepared, normalizeTypingText } from '@/modules/typing-engine';
 import { isDevelopment } from '@/lib/env';
-import { ESTIMATED_GLYPH_WIDTH, VISIBLE_LINE_COUNT, buildVisibleLines, getCurrentLineIndex } from '@/components/typing/line-layout';
+import { ESTIMATED_GLYPH_WIDTH, TEXT_VIEWPORT_MAX_WIDTH, VISIBLE_LINE_COUNT, buildVisibleLines, getCurrentLineIndex } from '@/components/typing/line-layout';
 import { TypingStatsBar } from '@/components/typing/typing-stats-bar';
 import { TypingViewport } from '@/components/typing/typing-viewport';
 import type { TypingTestClientProps } from '@/components/typing/types';
@@ -129,6 +129,7 @@ export function TypingTestClient({
   const submitLockRef = useRef(false);
   const hiddenInputRef = useRef<HTMLTextAreaElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const textMeasureRef = useRef<HTMLDivElement | null>(null);
   const saveTimerRef = useRef<number | null>(null);
   const frameRef = useRef<number | null>(null);
   const typedTextRef = useRef('');
@@ -143,7 +144,10 @@ export function TypingTestClient({
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [isFocused, setIsFocused] = useState(false);
-  const [containerWidth, setContainerWidth] = useState(960);
+  const [lineMeasure, setLineMeasure] = useState({
+    width: 960,
+    glyphWidth: ESTIMATED_GLYPH_WIDTH,
+  });
   const [isDevTimerPaused, setIsDevTimerPaused] = useState(isDevelopment);
   const [devElapsedMs, setDevElapsedMs] = useState(0);
   const devResumeStartedAtRef = useRef<number | null>(null);
@@ -210,18 +214,54 @@ export function TypingTestClient({
   }, []);
 
   useEffect(() => {
-    if (!containerRef.current) {
+    if (!textMeasureRef.current) {
       return;
     }
 
-    const observer = new ResizeObserver((entries) => {
-      const entry = entries[0];
-      if (entry) {
-        setContainerWidth(entry.contentRect.width);
+    const measure = () => {
+      const element = textMeasureRef.current;
+
+      if (!element) {
+        return;
       }
+
+      const computedStyle = window.getComputedStyle(element);
+      const probe = document.createElement('span');
+      const sample = '0'.repeat(64);
+
+      probe.textContent = sample;
+      probe.style.position = 'absolute';
+      probe.style.visibility = 'hidden';
+      probe.style.pointerEvents = 'none';
+      probe.style.whiteSpace = 'pre';
+      probe.style.fontFamily = computedStyle.fontFamily;
+      probe.style.fontSize = computedStyle.fontSize;
+      probe.style.fontWeight = computedStyle.fontWeight;
+      probe.style.fontStyle = computedStyle.fontStyle;
+      probe.style.letterSpacing = computedStyle.letterSpacing;
+
+      element.appendChild(probe);
+      const glyphWidth = Math.max(probe.getBoundingClientRect().width / sample.length, ESTIMATED_GLYPH_WIDTH);
+      probe.remove();
+
+      const width = Math.min(element.getBoundingClientRect().width, TEXT_VIEWPORT_MAX_WIDTH);
+
+      setLineMeasure((current) => {
+        if (Math.abs(current.width - width) < 0.5 && Math.abs(current.glyphWidth - glyphWidth) < 0.25) {
+          return current;
+        }
+
+        return { width, glyphWidth };
+      });
+    };
+
+    measure();
+
+    const observer = new ResizeObserver(() => {
+      measure();
     });
 
-    observer.observe(containerRef.current);
+    observer.observe(textMeasureRef.current);
 
     return () => observer.disconnect();
   }, []);
@@ -256,7 +296,7 @@ export function TypingTestClient({
 
   const typedChars = useMemo(() => Array.from(renderedText), [renderedText]);
   const currentCharIndex = Math.min(typedChars.length, Math.max(referenceChars.length - 1, 0));
-  const estimatedCharsPerLine = Math.floor((containerWidth - 24) / ESTIMATED_GLYPH_WIDTH);
+  const estimatedCharsPerLine = Math.floor((lineMeasure.width - 8) / lineMeasure.glyphWidth);
 
   const lines = useMemo(
     () => buildVisibleLines(referenceChars, estimatedCharsPerLine),
@@ -414,6 +454,7 @@ export function TypingTestClient({
         currentCharIndex={currentCharIndex}
         visibleLines={visibleLines}
         hiddenInputRef={hiddenInputRef}
+        textMeasureRef={textMeasureRef}
         onInputValue={handleInputValue}
         onBackspace={handleBackspace}
         onPaste={handlePaste}

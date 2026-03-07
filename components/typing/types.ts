@@ -20,6 +20,7 @@ export type TypingViewportProps = {
   currentCharIndex: number;
   visibleLines: LineSegment[];
   hiddenInputRef: React.RefObject<HTMLTextAreaElement | null>;
+  textMeasureRef: React.RefObject<HTMLDivElement | null>;
   onInputValue: (value: string) => void;
   onBackspace: () => void;
   onPaste: () => void;
