@@ -1,7 +1,5 @@
 'use client'
 
-import Link from 'next/link'
-
 import { Button } from '@/components/ui/button'
 import { logoutAction } from '@/features/auth/actions'
 
@@ -16,12 +14,6 @@ export function AdminTopNav({ adminName }: { adminName: string }) {
             <p className="text-sm text-muted-foreground">当前管理员：{adminName}</p>
           </div>
         </div>
-
-        <nav className="flex flex-wrap items-center gap-2">
-          <Button asChild variant="secondary" size="sm" className="rounded-full border border-border bg-muted px-4 text-foreground shadow-none hover:bg-muted">
-            <Link href="/admin/students">学生</Link>
-          </Button>
-        </nav>
 
         <form action={logoutAction}>
           <Button type="submit" variant="outline" size="sm">退出登录</Button>

@@ -31,7 +31,7 @@ const studentSchema = z.object({
 });
 
 export async function createStudentAction(formData: FormData) {
-  const redirectTo = getRedirectTarget(formData, '/admin/students');
+  const redirectTo = getRedirectTarget(formData, '/admin');
   const parsed = studentSchema.safeParse({
     studentNo: formData.get('studentNo'),
     name: formData.get('name'),
@@ -64,12 +64,12 @@ export async function createStudentAction(formData: FormData) {
       },
     });
 
-  revalidatePath('/admin/students');
+  revalidatePath('/admin');
   redirectWithNotice(redirectTo, 'success', '学生已保存');
 }
 
 export async function importStudentsCsvAction(formData: FormData) {
-  const redirectTo = getRedirectTarget(formData, '/admin/students');
+  const redirectTo = getRedirectTarget(formData, '/admin');
   const csvText = String(formData.get('csvText') ?? '').trim();
 
   if (!csvText) {
@@ -123,12 +123,12 @@ export async function importStudentsCsvAction(formData: FormData) {
       });
   }
 
-  revalidatePath('/admin/students');
+  revalidatePath('/admin');
   redirectWithNotice(redirectTo, 'success', `已导入 ${dataLines.length} 条学生记录`);
 }
 
 export async function updateStudentStatusAction(formData: FormData) {
-  const redirectTo = getRedirectTarget(formData, '/admin/students');
+  const redirectTo = getRedirectTarget(formData, '/admin');
   const studentId = z.coerce.number().int().positive().parse(formData.get('studentId'));
   const status = z.enum(['active', 'inactive']).parse(formData.get('status'));
 
@@ -140,6 +140,6 @@ export async function updateStudentStatusAction(formData: FormData) {
     })
     .where(eq(students.id, studentId));
 
-  revalidatePath('/admin/students');
+  revalidatePath('/admin');
   redirectWithNotice(redirectTo, 'success', '学生状态已更新');
 }
