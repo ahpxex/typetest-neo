@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -33,59 +33,126 @@ type AttemptResponse = {
 }
 
 const REQUEST_TIMEOUT_MS = 10000
+const attemptCache = new Map<string, AttemptResponse['attempts']>()
+const attemptRequestCache = new Map<string, Promise<AttemptResponse['attempts']>>()
 
-export function StudentScoresDialog({ student }: { student: AdminStudentSummary }) {
-  const [open, setOpen] = useState(false)
-  const [attempts, setAttempts] = useState<AttemptResponse['attempts'] | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+async function fetchStudentAttempts(studentNo: string) {
+  const cachedAttempts = attemptCache.get(studentNo)
 
-  useEffect(() => {
-    if (!open || attempts !== null || loading) {
-      return
-    }
+  if (cachedAttempts) {
+    return cachedAttempts
+  }
 
+  const pendingRequest = attemptRequestCache.get(studentNo)
+
+  if (pendingRequest) {
+    return pendingRequest
+  }
+
+  const request = (async () => {
     const controller = new AbortController()
     const timer = window.setTimeout(() => {
       controller.abort('timeout')
     }, REQUEST_TIMEOUT_MS)
 
-    const loadAttempts = async () => {
-      setLoading(true)
-      setError(null)
+    try {
+      const response = await fetch(`/api/admin/students/${encodeURIComponent(studentNo)}/attempts`, {
+        method: 'GET',
+        cache: 'no-store',
+        signal: controller.signal,
+      })
+      const payload = await response.json() as AttemptResponse & { error?: string }
 
-      try {
-        const response = await fetch(`/api/admin/students/${encodeURIComponent(student.studentNo)}/attempts`, {
-          method: 'GET',
-          cache: 'no-store',
-          signal: controller.signal,
-        })
-        const payload = await response.json() as AttemptResponse & { error?: string }
+      if (!response.ok) {
+        throw new Error(payload.error ?? '成绩加载失败')
+      }
 
-        if (!response.ok) {
-          throw new Error(payload.error ?? '成绩加载失败')
-        }
+      attemptCache.set(studentNo, payload.attempts)
 
-        setAttempts(payload.attempts)
-      } catch (loadError) {
-        if (loadError instanceof DOMException && loadError.name === 'AbortError') {
-          setError('成绩详情加载超时，请重试')
-        } else {
-          setError(loadError instanceof Error ? loadError.message : '成绩加载失败')
-        }
-      } finally {
-        window.clearTimeout(timer)
+      return payload.attempts
+    } finally {
+      window.clearTimeout(timer)
+      attemptRequestCache.delete(studentNo)
+    }
+  })()
+
+  attemptRequestCache.set(studentNo, request)
+
+  return request
+}
+
+export function StudentScoresDialog({ student }: { student: AdminStudentSummary }) {
+  const studentNo = student.studentNo
+  const [open, setOpen] = useState(false)
+  const [attempts, setAttempts] = useState<AttemptResponse['attempts'] | null>(() => attemptCache.get(studentNo) ?? null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const mountedRef = useRef(true)
+  const currentStudentNoRef = useRef(studentNo)
+
+  useEffect(() => {
+    return () => {
+      mountedRef.current = false
+    }
+  }, [])
+
+  useEffect(() => {
+    currentStudentNoRef.current = studentNo
+    setAttempts(attemptCache.get(studentNo) ?? null)
+    setLoading(false)
+    setError(null)
+  }, [studentNo])
+
+  const loadAttempts = useCallback(async () => {
+    if (loading) {
+      return
+    }
+
+    setLoading(true)
+    setError(null)
+
+    try {
+      const nextAttempts = await fetchStudentAttempts(studentNo)
+
+      if (!mountedRef.current || currentStudentNoRef.current !== studentNo) {
+        return
+      }
+
+      setAttempts(nextAttempts)
+    } catch (loadError) {
+      if (!mountedRef.current || currentStudentNoRef.current !== studentNo) {
+        return
+      }
+
+      if (loadError instanceof DOMException && loadError.name === 'AbortError') {
+        setError('成绩详情加载超时，请重试')
+      } else {
+        setError(loadError instanceof Error ? loadError.message : '成绩加载失败')
+      }
+    } finally {
+      if (mountedRef.current && currentStudentNoRef.current === studentNo) {
         setLoading(false)
       }
     }
+  }, [loading, studentNo])
+
+  const handleOpenChange = useCallback((nextOpen: boolean) => {
+    setOpen(nextOpen)
+
+    if (!nextOpen) {
+      return
+    }
+
+    const cachedAttempts = attemptCache.get(studentNo)
+
+    if (cachedAttempts) {
+      setAttempts(cachedAttempts)
+      setError(null)
+      return
+    }
 
     void loadAttempts()
-
-    return () => {
-      window.clearTimeout(timer)
-      controller.abort()
-    }
-  }, [attempts, loading, open, student.studentNo])
+  }, [loadAttempts, studentNo])
 
   const bestSpeed = useMemo(
     () => (student.bestSubmittedScoreKpm === null ? '—' : formatKpm(student.bestSubmittedScoreKpm)),
@@ -97,7 +164,7 @@ export function StudentScoresDialog({ student }: { student: AdminStudentSummary 
   )
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogTrigger asChild>
         <Button variant="outline" size="sm">查看成绩</Button>
       </DialogTrigger>
