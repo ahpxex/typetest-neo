@@ -8,3 +8,6 @@ export const SESSION_DURATION_HOURS = 12;
 
 export const DEV_ADMIN_USERNAME = 'admin';
 export const DEV_STUDENT_NO = '20260000001';
+
+export const TEST_DURATION_SECONDS = 180;
+export const MAX_ATTEMPTS_PER_STUDENT = 999;

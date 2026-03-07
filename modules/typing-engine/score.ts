@@ -5,6 +5,25 @@ function round(value: number, digits = 1) {
   return Number(value.toFixed(digits));
 }
 
+export function calculateStrictAccuracy({
+  inputCharCount,
+  mistypedCharCount,
+}: {
+  inputCharCount: number;
+  mistypedCharCount: number;
+}) {
+  const safeInputCharCount = Math.max(0, Math.floor(inputCharCount));
+
+  if (safeInputCharCount === 0) {
+    return 0;
+  }
+
+  const safeMistypedCharCount = Math.max(0, Math.floor(mistypedCharCount));
+  const accurateCharCount = Math.max(0, safeInputCharCount - safeMistypedCharCount);
+
+  return round((accurateCharCount / safeInputCharCount) * 100, 1);
+}
+
 export function calculateTypingMetrics({
   referenceText,
   typedText,

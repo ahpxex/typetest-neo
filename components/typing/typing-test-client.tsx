@@ -1,253 +1,121 @@
 'use client';
 
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 
-import { Button } from '@/components/ui/button';
-import { calculateTypingMetricsPrepared, normalizeTypingText } from '@/modules/typing-engine';
-import { formatDurationSeconds } from '@/lib/format';
+import { calculateStrictAccuracy, calculateTypingMetricsPrepared, normalizeTypingText } from '@/modules/typing-engine';
 import { isDevelopment } from '@/lib/env';
-import { cn } from '@/lib/utils';
+import { ESTIMATED_GLYPH_WIDTH, VISIBLE_LINE_COUNT, buildVisibleLines, getCurrentLineIndex } from '@/components/typing/line-layout';
+import { TypingStatsBar } from '@/components/typing/typing-stats-bar';
+import { TypingViewport } from '@/components/typing/typing-viewport';
+import type { TypingTestClientProps } from '@/components/typing/types';
 
-type TypingTestClientProps = {
-  attemptId: number;
-  articleTitle: string;
-  referenceText: string;
-  durationSeconds: number;
-  startedAt: string;
+type HistoricalAccuracyStats = {
+  inputCharCount: number;
+  mistypedCharCount: number;
 };
 
-type LineSegment = {
-  text: string;
-  start: number;
-  end: number;
+const EMPTY_HISTORICAL_ACCURACY_STATS: HistoricalAccuracyStats = {
+  inputCharCount: 0,
+  mistypedCharCount: 0,
 };
 
-type TypingViewportProps = {
-  articleTitle: string;
-  renderedText: string;
-  isFocused: boolean;
-  typedChars: string[];
-  currentCharIndex: number;
-  visibleLines: LineSegment[];
-  hiddenInputRef: React.RefObject<HTMLTextAreaElement | null>;
-  onInputValue: (value: string) => void;
-  onBackspace: () => void;
-  onPaste: () => void;
-  onFocusChange: (focused: boolean) => void;
-  onFocusTypingArea: () => void;
-};
+function getTypingTextStorageKey(attemptId: number) {
+  return `typing-attempt-${attemptId}`;
+}
 
-type TypingStatsBarProps = {
-  displayRemainingSeconds: number;
-  scoreKpm: number;
-  accuracy: number;
-  progress: number;
-  charCountError: number;
-  backspaceCount: number;
-  pasteCount: number;
-  submitting: boolean;
-  isDevTimerPaused: boolean;
-  onSubmit: () => void;
-  onToggleTimer: () => void;
-};
+function getTypingStatsStorageKey(attemptId: number) {
+  return `typing-attempt-stats-${attemptId}`;
+}
 
-const VISIBLE_LINE_COUNT = 4;
-const ESTIMATED_GLYPH_WIDTH = 14;
+function countSnapshotMistakes(referenceText: string, typedText: string) {
+  const referenceChars = Array.from(referenceText);
+  const typedChars = Array.from(typedText);
+  let mistakeCount = 0;
 
-function buildVisibleLines(referenceChars: string[], maxCharsPerLine: number) {
-  const safeWidth = Math.max(12, maxCharsPerLine);
-  const lines: LineSegment[] = [];
-
-  let index = 0;
-
-  while (index < referenceChars.length) {
-    const lineStart = index;
-    let lineLength = 0;
-    let lastBreak = -1;
-
-    while (index < referenceChars.length) {
-      const character = referenceChars[index];
-
-      if (character === '\n') {
-        break;
-      }
-
-      lineLength += 1;
-      if (character === ' ') {
-        lastBreak = index;
-      }
-
-      if (lineLength > safeWidth) {
-        if (lastBreak >= lineStart) {
-          index = lastBreak + 1;
-        }
-        break;
-      }
-
-      index += 1;
-    }
-
-    if (index === lineStart) {
-      lines.push({ text: '', start: lineStart, end: lineStart });
-      index += 1;
-      continue;
-    }
-
-    const lineEnd = Math.min(index, referenceChars.length);
-    const lineText = referenceChars.slice(lineStart, lineEnd).join('').replace(/\s+$/g, '');
-    lines.push({ text: lineText, start: lineStart, end: lineEnd });
-
-    if (referenceChars[index] === '\n') {
-      index += 1;
+  for (let index = 0; index < typedChars.length; index += 1) {
+    if (typedChars[index] !== referenceChars[index]) {
+      mistakeCount += 1;
     }
   }
 
-  return lines.length > 0 ? lines : [{ text: '', start: 0, end: 0 }];
+  return mistakeCount;
 }
 
-function getCurrentLineIndex(lines: LineSegment[], currentCharIndex: number) {
-  const resolvedIndex = lines.findIndex((line, index) => {
-    const nextLineStart = lines[index + 1]?.start ?? Number.POSITIVE_INFINITY;
-    return currentCharIndex >= line.start && currentCharIndex < nextLineStart;
-  });
-
-  if (resolvedIndex >= 0) {
-    return resolvedIndex;
+function parseHistoricalAccuracyStats(value: string | null) {
+  if (!value) {
+    return null;
   }
 
-  return Math.max(lines.length - 1, 0);
+  try {
+    const parsed = JSON.parse(value) as Partial<HistoricalAccuracyStats>;
+    const inputCharCount = Number.isFinite(parsed.inputCharCount)
+      ? Math.max(0, Math.floor(parsed.inputCharCount ?? 0))
+      : 0;
+    const mistypedCharCount = Number.isFinite(parsed.mistypedCharCount)
+      ? Math.max(0, Math.floor(parsed.mistypedCharCount ?? 0))
+      : 0;
+
+    return {
+      inputCharCount,
+      mistypedCharCount,
+    } satisfies HistoricalAccuracyStats;
+  } catch {
+    return null;
+  }
 }
 
-const TypingViewport = memo(function TypingViewport({
-  articleTitle,
-  renderedText,
-  isFocused,
-  typedChars,
-  currentCharIndex,
-  visibleLines,
-  hiddenInputRef,
-  onInputValue,
-  onBackspace,
-  onPaste,
-  onFocusChange,
-  onFocusTypingArea,
-}: TypingViewportProps) {
-  return (
-    <>
-      <div className="mb-4 flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
-        <span>{articleTitle}</span>
-        <span>自动保存已开启</span>
-      </div>
+function getInsertedCharacterDelta(
+  previousValue: string,
+  nextValue: string,
+  referenceChars: string[],
+): HistoricalAccuracyStats {
+  if (previousValue === nextValue) {
+    return EMPTY_HISTORICAL_ACCURACY_STATS;
+  }
 
-      <div
-        onMouseDown={(event) => {
-          event.preventDefault();
-          onFocusTypingArea();
-        }}
-        className="relative flex min-h-0 flex-1 cursor-text items-center px-2 md:px-4"
-      >
-        <textarea
-          ref={hiddenInputRef}
-          defaultValue={renderedText}
-          onChange={(event) => onInputValue(event.target.value)}
-          onFocus={() => onFocusChange(true)}
-          onBlur={() => onFocusChange(false)}
-          onPaste={onPaste}
-          onKeyDown={(event) => {
-            if (event.key === 'Backspace') {
-              onBackspace();
-            }
-          }}
-          className="absolute inset-0 h-full w-full resize-none opacity-0"
-          spellCheck={false}
-          autoCapitalize="off"
-          autoCorrect="off"
-          autoFocus
-        />
+  const previousChars = Array.from(previousValue);
+  const nextChars = Array.from(nextValue);
+  const sharedLength = Math.min(previousChars.length, nextChars.length);
 
-        <div className="mx-auto w-full max-w-[1400px] text-center font-mono text-[1.18rem] leading-[1.95] tracking-[0.01em] text-zinc-400/60 md:text-[1.55rem] md:leading-[1.85]">
-          {!isFocused && renderedText.length === 0 ? (
-            <div className="mb-8 text-center text-xs uppercase tracking-[0.2em] text-muted-foreground">
-              点击文本区域开始输入
-            </div>
-          ) : null}
+  let start = 0;
+  while (start < sharedLength && previousChars[start] === nextChars[start]) {
+    start += 1;
+  }
 
-          <div className="space-y-3">
-            {visibleLines.map((line, lineOffset) => {
-              const isCurrentLine = lineOffset === 0;
-              const lineChars = Array.from(line.text);
+  let previousEnd = previousChars.length - 1;
+  let nextEnd = nextChars.length - 1;
 
-              return (
-                <div
-                  key={`${line.start}-${line.end}`}
-                  className={cn(
-                    'mx-auto min-h-[3.2rem] max-w-full whitespace-pre-wrap break-words text-center',
-                    !isCurrentLine && 'opacity-65',
-                  )}
-                >
-                  {lineChars.map((character, charIndex) => {
-                    const absoluteIndex = line.start + charIndex;
-                    const typedCharacter = typedChars[absoluteIndex];
-                    const hasTyped = typedCharacter !== undefined;
-                    const isActive = absoluteIndex === currentCharIndex;
-                    const isCorrect = hasTyped && typedCharacter === character;
-                    const isIncorrect = hasTyped && typedCharacter !== character;
+  while (
+    previousEnd >= start
+    && nextEnd >= start
+    && previousChars[previousEnd] === nextChars[nextEnd]
+  ) {
+    previousEnd -= 1;
+    nextEnd -= 1;
+  }
 
-                    return (
-                      <span
-                        key={`${absoluteIndex}-${character}`}
-                        className={cn(
-                          'relative',
-                          isCorrect && 'text-foreground',
-                          isIncorrect && 'bg-destructive/15 text-destructive',
-                          isActive && 'bg-primary/12 text-foreground before:absolute before:bottom-0 before:left-0 before:h-[2px] before:w-full before:bg-primary',
-                        )}
-                      >
-                        {character}
-                      </span>
-                    );
-                  })}
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      </div>
-    </>
-  );
-});
+  const insertedChars = nextChars.slice(start, nextEnd + 1);
 
-const TypingStatsBar = memo(function TypingStatsBar({
-  displayRemainingSeconds,
-  scoreKpm,
-  accuracy,
-  progress,
-  charCountError,
-  backspaceCount,
-  pasteCount,
-  submitting,
-  isDevTimerPaused,
-  onSubmit,
-  onToggleTimer,
-}: TypingStatsBarProps) {
-  return (
-    <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 flex justify-center px-2 md:px-4">
-      <div className="pointer-events-auto inline-flex max-w-[min(100%,1100px)] flex-wrap items-center justify-center gap-2 rounded-full border border-border bg-background/92 px-3 py-3 shadow-lg backdrop-blur md:gap-3 md:px-4">
-        <FloatingMetric label={isDevelopment && isDevTimerPaused ? '倒计时（暂停）' : '剩余时间'} value={formatDurationSeconds(displayRemainingSeconds)} accent interactive={isDevelopment} onClick={onToggleTimer} />
-        <FloatingMetric label="速度" value={`${scoreKpm}`} />
-        <FloatingMetric label="正确率" value={`${accuracy}%`} />
-        <FloatingMetric label="进度" value={`${progress}%`} />
-        <FloatingMetric label="错误" value={`${charCountError}`} />
-        <FloatingMetric label="退格" value={`${backspaceCount}`} />
-        <FloatingMetric label="粘贴" value={`${pasteCount}`} />
-        <Button type="button" size="sm" className="rounded-full px-3 py-2 text-sm shadow-none" onMouseDown={(event) => event.preventDefault()} onClick={onSubmit} disabled={submitting}>
-          {submitting ? '提交中…' : '提交成绩'}
-        </Button>
-      </div>
-    </div>
-  );
-});
+  if (insertedChars.length === 0) {
+    return EMPTY_HISTORICAL_ACCURACY_STATS;
+  }
+
+  let mistypedCharCount = 0;
+
+  for (let offset = 0; offset < insertedChars.length; offset += 1) {
+    const expectedChar = referenceChars[start + offset];
+
+    if (insertedChars[offset] !== expectedChar) {
+      mistypedCharCount += 1;
+    }
+  }
+
+  return {
+    inputCharCount: insertedChars.length,
+    mistypedCharCount,
+  };
+}
 
 export function TypingTestClient({
   attemptId,
@@ -264,9 +132,11 @@ export function TypingTestClient({
   const saveTimerRef = useRef<number | null>(null);
   const frameRef = useRef<number | null>(null);
   const typedTextRef = useRef('');
+  const historicalAccuracyStatsRef = useRef<HistoricalAccuracyStats>(EMPTY_HISTORICAL_ACCURACY_STATS);
   const initialTypedLengthRef = useRef(0);
   const hasTypedSinceMountRef = useRef(false);
   const [renderedText, setRenderedText] = useState('');
+  const [historicalAccuracyStats, setHistoricalAccuracyStats] = useState<HistoricalAccuracyStats>(EMPTY_HISTORICAL_ACCURACY_STATS);
   const [backspaceCount, setBackspaceCount] = useState(0);
   const [pasteCount, setPasteCount] = useState(0);
   const [nowMs, setNowMs] = useState(Date.now());
@@ -278,6 +148,8 @@ export function TypingTestClient({
   const [devElapsedMs, setDevElapsedMs] = useState(0);
   const devResumeStartedAtRef = useRef<number | null>(null);
 
+  const referenceChars = useMemo(() => Array.from(referenceText), [referenceText]);
+
   useEffect(() => {
     const timer = window.setInterval(() => {
       setNowMs(Date.now());
@@ -287,20 +159,35 @@ export function TypingTestClient({
   }, []);
 
   useEffect(() => {
-    const storageKey = `typing-attempt-${attemptId}`;
-    const saved = window.localStorage.getItem(storageKey) ?? '';
-    typedTextRef.current = saved;
-    initialTypedLengthRef.current = Array.from(saved).length;
+    const storageKey = getTypingTextStorageKey(attemptId);
+    const statsKey = getTypingStatsStorageKey(attemptId);
+    const savedText = window.localStorage.getItem(storageKey) ?? '';
+    const savedStats = parseHistoricalAccuracyStats(window.localStorage.getItem(statsKey));
+    const fallbackStats = {
+      inputCharCount: Array.from(savedText).length,
+      mistypedCharCount: countSnapshotMistakes(referenceText, savedText),
+    } satisfies HistoricalAccuracyStats;
+    const nextHistoricalAccuracyStats = savedStats ?? fallbackStats;
+
+    typedTextRef.current = savedText;
+    historicalAccuracyStatsRef.current = nextHistoricalAccuracyStats;
+    initialTypedLengthRef.current = Array.from(savedText).length;
     hasTypedSinceMountRef.current = false;
-    setRenderedText(saved);
+    setRenderedText(savedText);
+    setHistoricalAccuracyStats(nextHistoricalAccuracyStats);
+    setBackspaceCount(0);
+    setPasteCount(0);
+    setError(null);
+    setSubmitting(false);
 
     if (hiddenInputRef.current) {
-      hiddenInputRef.current.value = saved;
+      hiddenInputRef.current.value = savedText;
     }
-  }, [attemptId]);
+  }, [attemptId, referenceText]);
 
   useEffect(() => {
-    const storageKey = `typing-attempt-${attemptId}`;
+    const storageKey = getTypingTextStorageKey(attemptId);
+    const statsKey = getTypingStatsStorageKey(attemptId);
 
     if (saveTimerRef.current) {
       window.clearTimeout(saveTimerRef.current);
@@ -308,6 +195,7 @@ export function TypingTestClient({
 
     saveTimerRef.current = window.setTimeout(() => {
       window.localStorage.setItem(storageKey, typedTextRef.current);
+      window.localStorage.setItem(statsKey, JSON.stringify(historicalAccuracyStatsRef.current));
     }, 250);
 
     return () => {
@@ -315,7 +203,7 @@ export function TypingTestClient({
         window.clearTimeout(saveTimerRef.current);
       }
     };
-  }, [attemptId, renderedText]);
+  }, [attemptId, historicalAccuracyStats.inputCharCount, historicalAccuracyStats.mistypedCharCount, renderedText]);
 
   useEffect(() => {
     hiddenInputRef.current?.focus();
@@ -366,7 +254,6 @@ export function TypingTestClient({
     [elapsedSeconds, normalizedReferenceText, normalizedTypedText],
   );
 
-  const referenceChars = useMemo(() => Array.from(referenceText), [referenceText]);
   const typedChars = useMemo(() => Array.from(renderedText), [renderedText]);
   const currentCharIndex = Math.min(typedChars.length, Math.max(referenceChars.length - 1, 0));
   const estimatedCharsPerLine = Math.floor((containerWidth - 24) / ESTIMATED_GLYPH_WIDTH);
@@ -392,6 +279,7 @@ export function TypingTestClient({
   const liveScoreKpm = !hasTypedSinceMountRef.current || elapsedMilliseconds <= 0
     ? 0
     : Math.round((liveTypedCount / stabilizedDurationMs) * 60000);
+  const liveAccuracy = calculateStrictAccuracy(historicalAccuracyStats);
 
   const submitAttempt = useCallback(async () => {
     if (submitLockRef.current) {
@@ -413,6 +301,8 @@ export function TypingTestClient({
           durationSecondsUsed: elapsedSeconds,
           backspaceCount,
           pasteCount,
+          inputCharCount: historicalAccuracyStatsRef.current.inputCharCount,
+          mistypedCharCount: historicalAccuracyStatsRef.current.mistypedCharCount,
           clientMeta: {
             userAgent: navigator.userAgent,
             language: navigator.language,
@@ -430,7 +320,8 @@ export function TypingTestClient({
         throw new Error(payload.error ?? '成绩提交失败');
       }
 
-      window.localStorage.removeItem(`typing-attempt-${attemptId}`);
+      window.localStorage.removeItem(getTypingTextStorageKey(attemptId));
+      window.localStorage.removeItem(getTypingStatsStorageKey(attemptId));
       router.push(payload.redirectTo);
       router.refresh();
     } catch (submitError) {
@@ -472,17 +363,26 @@ export function TypingTestClient({
 
     if (devResumeStartedAtRef.current !== null) {
       const resumeStartedAt = devResumeStartedAtRef.current;
-      if (resumeStartedAt !== null) {
-        setDevElapsedMs((value) => value + (Date.now() - resumeStartedAt));
-        devResumeStartedAtRef.current = null;
-      }
+      setDevElapsedMs((value) => value + (Date.now() - resumeStartedAt));
+      devResumeStartedAtRef.current = null;
     }
 
     setIsDevTimerPaused(true);
   }, [isDevTimerPaused]);
 
   const handleInputValue = useCallback((value: string) => {
+    const previousValue = typedTextRef.current;
+    const historicalAccuracyDelta = getInsertedCharacterDelta(previousValue, value, referenceChars);
+
     typedTextRef.current = value;
+
+    if (historicalAccuracyDelta.inputCharCount > 0) {
+      historicalAccuracyStatsRef.current = {
+        inputCharCount: historicalAccuracyStatsRef.current.inputCharCount + historicalAccuracyDelta.inputCharCount,
+        mistypedCharCount: historicalAccuracyStatsRef.current.mistypedCharCount + historicalAccuracyDelta.mistypedCharCount,
+      };
+    }
+
     const currentLength = Array.from(value).length;
 
     if (currentLength < initialTypedLengthRef.current) {
@@ -500,11 +400,12 @@ export function TypingTestClient({
     frameRef.current = window.requestAnimationFrame(() => {
       frameRef.current = null;
       setRenderedText(typedTextRef.current);
+      setHistoricalAccuracyStats(historicalAccuracyStatsRef.current);
     });
-  }, []);
+  }, [referenceChars]);
 
   return (
-    <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden pb-24 md:pb-28">
+    <div ref={containerRef} className="relative flex min-h-0 flex-1 flex-col overflow-hidden pb-24 md:pb-28">
       <TypingViewport
         articleTitle={articleTitle}
         renderedText={renderedText}
@@ -525,7 +426,7 @@ export function TypingTestClient({
       <TypingStatsBar
         displayRemainingSeconds={displayRemainingSeconds}
         scoreKpm={liveScoreKpm}
-        accuracy={metrics.accuracy}
+        accuracy={liveAccuracy}
         progress={metrics.progress}
         charCountError={metrics.charCountError}
         backspaceCount={backspaceCount}
@@ -536,36 +437,5 @@ export function TypingTestClient({
         onToggleTimer={toggleDevTimerPaused}
       />
     </div>
-  );
-}
-
-function FloatingMetric({
-  label,
-  value,
-  accent = false,
-  interactive = false,
-  onClick,
-}: {
-  label: string;
-  value: string;
-  accent?: boolean;
-  interactive?: boolean;
-  onClick?: () => void;
-}) {
-  const Comp = interactive ? 'button' : 'div';
-
-  return (
-    <Comp
-      type={interactive ? 'button' : undefined}
-      onClick={onClick}
-      className={cn(
-        'rounded-full border border-border bg-muted/40 px-3 py-2 text-sm',
-        accent && 'border-primary/30 bg-primary/8',
-        interactive && 'cursor-pointer transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none',
-      )}
-    >
-      <span className="mr-2 text-xs font-medium tracking-[0.04em] text-muted-foreground">{label}</span>
-      <span className={cn('font-semibold tabular-nums', accent && 'text-primary')}>{value}</span>
-    </Comp>
   );
 }

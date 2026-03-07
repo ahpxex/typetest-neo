@@ -5,7 +5,7 @@ import { db } from '@/db/client';
 import { attempts } from '@/db/schema';
 import { getCurrentStudent } from '@/lib/auth/session';
 import { getAttemptDetail } from '@/lib/data/queries';
-import { calculateTypingMetrics, normalizeTypingText } from '@/modules/typing-engine';
+import { calculateStrictAccuracy, calculateTypingMetrics, normalizeTypingText } from '@/modules/typing-engine';
 
 export async function POST(
   request: Request,
@@ -34,6 +34,8 @@ export async function POST(
     durationSecondsUsed?: number;
     backspaceCount?: number;
     pasteCount?: number;
+    inputCharCount?: number;
+    mistypedCharCount?: number;
     clientMeta?: Record<string, unknown>;
   };
 
@@ -46,6 +48,17 @@ export async function POST(
     referenceText: attempt.articleContent ?? '',
     typedText: typedTextRaw,
     durationSeconds: durationSecondsUsed,
+  });
+
+  const inputCharCount = Number.isFinite(payload.inputCharCount)
+    ? Math.max(0, Math.floor(payload.inputCharCount ?? 0))
+    : metrics.charCountTyped;
+  const mistypedCharCount = Number.isFinite(payload.mistypedCharCount)
+    ? Math.max(0, Math.floor(payload.mistypedCharCount ?? 0))
+    : metrics.charCountError;
+  const strictAccuracy = calculateStrictAccuracy({
+    inputCharCount,
+    mistypedCharCount,
   });
 
   const suspicionFlags: string[] = [];
@@ -67,8 +80,8 @@ export async function POST(
     clientMeta: payload.clientMeta ?? {},
     suspicionFlags,
     scoreKpm: metrics.scoreKpm,
-    accuracy: metrics.accuracy,
-    scoreVersion: 'v1',
+    accuracy: strictAccuracy,
+    scoreVersion: 'v2',
     updatedAt: new Date(),
   }).where(and(eq(attempts.id, id), eq(attempts.studentId, currentStudent.student.id)));
 
