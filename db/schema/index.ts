@@ -1,6 +1,8 @@
 import { relations, sql } from 'drizzle-orm';
 import { check, index, integer, real, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
 
+import { attemptModeValues } from '@/lib/attempt-mode';
+
 const articleLanguageValues = ['en', 'zh'] as const;
 const articleStatusValues = ['draft', 'published', 'archived'] as const;
 const adminRoleValues = ['admin', 'teacher'] as const;
@@ -26,7 +28,13 @@ export const students = sqliteTable(
     studentNo: text('student_no').notNull(),
     name: text('name').notNull(),
     campusEmail: text('campus_email').notNull(),
+    enrollmentYear: text('enrollment_year').notNull(),
+    schoolCode: text('school_code').notNull(),
+    majorCode: text('major_code').notNull(),
+    classSerial: text('class_serial').notNull(),
     status: text('status', { enum: studentStatusValues }).notNull().default('active'),
+    emailVerifiedAt: integer('email_verified_at', { mode: 'timestamp_ms' }),
+    lastLoginAt: integer('last_login_at', { mode: 'timestamp_ms' }),
     notes: text('notes'),
     ...timestamps(),
   },
@@ -34,6 +42,9 @@ export const students = sqliteTable(
     uniqueIndex('students_student_no_unique').on(table.studentNo),
     uniqueIndex('students_campus_email_unique').on(table.campusEmail),
     index('students_name_idx').on(table.name),
+    index('students_enrollment_year_idx').on(table.enrollmentYear),
+    index('students_school_code_idx').on(table.schoolCode),
+    index('students_major_code_idx').on(table.majorCode),
     check(
       'students_campus_email_ucass_check',
       sql`lower(${table.campusEmail}) like '%@ucass.edu.cn'`,
@@ -92,6 +103,7 @@ export const attempts = sqliteTable(
     articleId: integer('article_id')
       .notNull()
       .references(() => articles.id, { onDelete: 'restrict', onUpdate: 'cascade' }),
+    mode: text('mode', { enum: attemptModeValues }).notNull().default('exam'),
     attemptNo: integer('attempt_no').notNull().default(1),
     status: text('status', { enum: attemptStatusValues }).notNull().default('started'),
     studentNoSnapshot: text('student_no_snapshot').notNull(),
@@ -130,6 +142,7 @@ export const attempts = sqliteTable(
     uniqueIndex('attempts_student_attempt_no_unique').on(table.studentId, table.attemptNo),
     index('attempts_student_idx').on(table.studentId),
     index('attempts_article_idx').on(table.articleId),
+    index('attempts_mode_idx').on(table.mode),
     index('attempts_status_idx').on(table.status),
     index('attempts_submitted_at_idx').on(table.submittedAt),
     check('attempts_duration_seconds_allocated_positive_check', sql`${table.durationSecondsAllocated} > 0`),

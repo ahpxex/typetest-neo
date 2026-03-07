@@ -6,13 +6,13 @@ import { z } from 'zod';
 import { clearSession, createSession } from '@/lib/auth/session';
 import {
   getAdminByUsername,
-  getStudentByIdentity,
 } from '@/lib/data/queries';
 import { verifyPassword } from '@/lib/auth/password';
 import { DEV_ADMIN_USERNAME, DEV_STUDENT_NO, isDevelopment } from '@/lib/env';
 import { db } from '@/db/client';
 import { students } from '@/db/schema';
 import { eq } from 'drizzle-orm';
+import { isCampusEmailMatch, parseStudentIdentity } from '@/lib/student-identity';
 
 export type AuthFormState = {
   error?: string;
@@ -47,10 +47,60 @@ export async function studentLoginAction(
     return { error: parsed.error.issues[0]?.message ?? '学生登录信息不完整' };
   }
 
-  const student = await getStudentByIdentity(parsed.data);
+  const parsedIdentity = parseStudentIdentity(parsed.data.studentNo);
+
+  if (!parsedIdentity) {
+    return { error: '请输入 11 位数字学号。' };
+  }
+
+  if (!isCampusEmailMatch(parsedIdentity.studentNo, parsed.data.campusEmail)) {
+    return { error: '校园邮箱必须与学号对应。' };
+  }
+
+  const existingStudent = await db.query.students.findFirst({
+    where: eq(students.studentNo, parsedIdentity.studentNo),
+  });
+
+  if (existingStudent?.status === 'inactive') {
+    return { error: '该学生账号已被停用，请联系管理员。' };
+  }
+
+  const lastLoginAt = new Date();
+
+  await db.insert(students)
+    .values({
+      studentNo: parsedIdentity.studentNo,
+      name: parsed.data.name.trim(),
+      campusEmail: parsedIdentity.campusEmail,
+      enrollmentYear: parsedIdentity.enrollmentYear,
+      schoolCode: parsedIdentity.schoolCode,
+      majorCode: parsedIdentity.majorCode,
+      classSerial: parsedIdentity.classSerial,
+      status: existingStudent?.status ?? 'active',
+      emailVerifiedAt: existingStudent?.emailVerifiedAt ?? null,
+      lastLoginAt,
+      notes: existingStudent?.notes ?? null,
+    })
+    .onConflictDoUpdate({
+      target: students.studentNo,
+      set: {
+        name: parsed.data.name.trim(),
+        campusEmail: parsedIdentity.campusEmail,
+        enrollmentYear: parsedIdentity.enrollmentYear,
+        schoolCode: parsedIdentity.schoolCode,
+        majorCode: parsedIdentity.majorCode,
+        classSerial: parsedIdentity.classSerial,
+        lastLoginAt,
+        updatedAt: new Date(),
+      },
+    });
+
+  const student = await db.query.students.findFirst({
+    where: eq(students.studentNo, parsedIdentity.studentNo),
+  });
 
   if (!student) {
-    return { error: '未找到匹配的学生信息，请检查姓名、学号和校园邮箱是否一致。' };
+    return { error: '学生登录初始化失败，请稍后重试。' };
   }
 
   await clearSession('student');

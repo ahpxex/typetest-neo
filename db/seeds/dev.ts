@@ -3,6 +3,7 @@ import { eq } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { adminUsers, articles, students } from '@/db/schema';
 import { hashPassword } from '@/lib/auth/password';
+import { buildCampusEmail, parseStudentIdentity } from '@/lib/student-identity';
 
 const DEV_ADMIN = {
   username: 'admin',
@@ -11,9 +12,9 @@ const DEV_ADMIN = {
 } as const;
 
 const DEV_STUDENT = {
-  studentNo: '20260000001',
+  studentNo: '20261141128',
   name: '测试学生',
-  campusEmail: 'student.dev@ucass.edu.cn',
+  campusEmail: buildCampusEmail('20261141128'),
 } as const;
 
 const DEV_ARTICLE = {
@@ -33,13 +34,32 @@ function wordCount(input: string) {
 }
 
 async function seedStudent() {
+  const parsedIdentity = parseStudentIdentity(DEV_STUDENT.studentNo);
+
+  if (!parsedIdentity) {
+    throw new Error('Invalid dev student number.');
+  }
+
   await db.insert(students)
-    .values(DEV_STUDENT)
+    .values({
+      ...DEV_STUDENT,
+      enrollmentYear: parsedIdentity.enrollmentYear,
+      schoolCode: parsedIdentity.schoolCode,
+      majorCode: parsedIdentity.majorCode,
+      classSerial: parsedIdentity.classSerial,
+      emailVerifiedAt: new Date(),
+      lastLoginAt: null,
+    })
     .onConflictDoUpdate({
       target: students.studentNo,
       set: {
         name: DEV_STUDENT.name,
         campusEmail: DEV_STUDENT.campusEmail,
+        enrollmentYear: parsedIdentity.enrollmentYear,
+        schoolCode: parsedIdentity.schoolCode,
+        majorCode: parsedIdentity.majorCode,
+        classSerial: parsedIdentity.classSerial,
+        emailVerifiedAt: new Date(),
         status: 'active',
         updatedAt: new Date(),
       },

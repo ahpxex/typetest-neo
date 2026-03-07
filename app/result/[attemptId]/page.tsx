@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
 import { getAnySignedInUser } from '@/lib/auth/guards'
 import { getAttemptDetail, getLeaderboard } from '@/lib/data/queries'
+import { getAttemptModeLabel } from '@/lib/attempt-mode'
 import { formatDateTime, formatDurationSeconds, formatKpm, formatPercent } from '@/lib/format'
 
 export default async function ResultPage({ params }: { params: Promise<{ attemptId: string }> }) {
@@ -22,7 +23,11 @@ export default async function ResultPage({ params }: { params: Promise<{ attempt
   }
 
   const leaderboard = await getLeaderboard()
-  const overallRank = leaderboard.find((entry) => entry.attemptId === attempt.attemptId)?.rank
+  const overallRank = attempt.mode === 'exam'
+    ? leaderboard.find((entry) => entry.attemptId === attempt.attemptId)?.rank
+    : undefined
+  const modeLabel = getAttemptModeLabel(attempt.mode)
+  const retryHref = attempt.mode === 'practice' ? '/typing/practice' : '/typing/exam'
 
   return (
     <main className="flex min-h-screen items-center justify-center bg-background px-4 py-8 md:px-6">
@@ -31,6 +36,7 @@ export default async function ResultPage({ params }: { params: Promise<{ attempt
           <CardHeader>
             <div className="flex flex-wrap items-center gap-3">
               <CardTitle>成绩摘要</CardTitle>
+              <Badge variant={attempt.mode === 'exam' ? 'secondary' : 'outline'}>{modeLabel}</Badge>
               <Badge variant={attempt.status === 'submitted' ? 'secondary' : attempt.status === 'invalidated' ? 'destructive' : 'outline'}>
                 {attempt.status}
               </Badge>
@@ -42,7 +48,7 @@ export default async function ResultPage({ params }: { params: Promise<{ attempt
               <Metric title="速度" value={formatKpm(attempt.scoreKpm)} />
               <Metric title="正确率" value={formatPercent(attempt.accuracy)} />
               <Metric title="用时" value={formatDurationSeconds(attempt.durationSecondsUsed ?? attempt.durationSecondsAllocated)} />
-              <Metric title="总榜排名" value={overallRank ? `#${overallRank}` : '未上榜'} />
+              <Metric title="总榜排名" value={attempt.mode === 'exam' ? (overallRank ? `#${overallRank}` : '未上榜') : '练习不参与'} />
             </div>
 
             <div className="grid gap-3 rounded-2xl border border-border bg-muted/30 p-4 text-sm text-muted-foreground md:grid-cols-2">
@@ -61,10 +67,10 @@ export default async function ResultPage({ params }: { params: Promise<{ attempt
           </CardContent>
           <CardFooter className="justify-center gap-3 border-t">
             <Button asChild variant="outline" className="min-w-32">
-              <Link href="/ranking">查看排行榜</Link>
+              <Link href="/typing">返回首页</Link>
             </Button>
             <Button asChild variant="default" className="min-w-32">
-              <Link href="/typing">重新测试</Link>
+              <Link href={retryHref}>再来一次</Link>
             </Button>
           </CardFooter>
         </Card>

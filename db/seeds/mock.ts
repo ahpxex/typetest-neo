@@ -2,6 +2,7 @@ import { asc, eq, inArray, sql } from 'drizzle-orm';
 
 import { db } from '@/db/client';
 import { articles, attempts, students } from '@/db/schema';
+import { buildCampusEmail, parseStudentIdentity } from '@/lib/student-identity';
 
 const MOCK_NOTES = 'seed:mock';
 const DEFAULT_COUNT = 1000;
@@ -9,6 +10,7 @@ const STUDENT_INSERT_CHUNK_SIZE = 500;
 const ATTEMPT_INSERT_CHUNK_SIZE = 500;
 const ATTEMPT_DELETE_CHUNK_SIZE = 500;
 const DURATION_SECONDS_ALLOCATED = 180;
+const MOCK_MAJOR_CODES = ['11411', '11412', '11413', '11511', '11611', '11711', '11811', '11911', '12011', '12111'];
 
 type MockStudentRow = {
   id: number;
@@ -45,11 +47,16 @@ function chunk<T>(values: T[], size: number) {
 }
 
 function buildStudentNo(index: number) {
-  return `20261${String(index).padStart(6, '0')}`;
+  const yearOffset = Math.floor((index - 1) / (MOCK_MAJOR_CODES.length * 100));
+  const enrollmentYear = 2024 + yearOffset;
+  const majorCode = MOCK_MAJOR_CODES[Math.floor((index - 1) / 100) % MOCK_MAJOR_CODES.length] ?? MOCK_MAJOR_CODES[0];
+  const classSerial = String((index - 1) % 100).padStart(2, '0');
+
+  return `${enrollmentYear}${majorCode}${classSerial}`;
 }
 
-function buildCampusEmail(index: number) {
-  return `mock.${String(index).padStart(5, '0')}@ucass.edu.cn`;
+function buildStudentCampusEmail(index: number) {
+  return buildCampusEmail(buildStudentNo(index));
 }
 
 function buildStudentName(index: number) {
@@ -138,12 +145,24 @@ async function clearPreviousMockData() {
 async function seedMockStudents(targetCount: number) {
   const rows = Array.from({ length: targetCount }, (_, offset) => {
     const index = offset + 1;
+    const studentNo = buildStudentNo(index);
+    const parsedIdentity = parseStudentIdentity(studentNo);
+
+    if (!parsedIdentity) {
+      throw new Error(`Invalid mock student number generated: ${studentNo}`);
+    }
 
     return {
-      studentNo: buildStudentNo(index),
+      studentNo,
       name: buildStudentName(index),
-      campusEmail: buildCampusEmail(index),
+      campusEmail: buildStudentCampusEmail(index),
+      enrollmentYear: parsedIdentity.enrollmentYear,
+      schoolCode: parsedIdentity.schoolCode,
+      majorCode: parsedIdentity.majorCode,
+      classSerial: parsedIdentity.classSerial,
       status: index % 19 === 0 ? 'inactive' as const : 'active' as const,
+      emailVerifiedAt: null,
+      lastLoginAt: null,
       notes: MOCK_NOTES,
     };
   });
@@ -178,6 +197,7 @@ function buildAttemptRows(mockStudents: MockStudentRow[], articlePool: ArticleRo
     rows.push({
       studentId: student.id,
       articleId: primaryArticle.id,
+      mode: 'exam' as const,
       attemptNo: 1,
       status: 'submitted' as const,
       studentNoSnapshot: student.studentNo,
@@ -212,6 +232,7 @@ function buildAttemptRows(mockStudents: MockStudentRow[], articlePool: ArticleRo
       rows.push({
         studentId: student.id,
         articleId: secondArticle.id,
+        mode: 'exam' as const,
         attemptNo: 2,
         status: 'submitted' as const,
         studentNoSnapshot: student.studentNo,
@@ -247,6 +268,7 @@ function buildAttemptRows(mockStudents: MockStudentRow[], articlePool: ArticleRo
       rows.push({
         studentId: student.id,
         articleId: thirdArticle.id,
+        mode: 'exam' as const,
         attemptNo: 3,
         status: 'invalidated' as const,
         studentNoSnapshot: student.studentNo,

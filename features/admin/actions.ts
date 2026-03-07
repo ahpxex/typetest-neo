@@ -7,6 +7,7 @@ import { z } from 'zod';
 
 import { db } from '@/db/client';
 import { students } from '@/db/schema';
+import { isCampusEmailMatch, parseStudentIdentity } from '@/lib/student-identity';
 
 function getRedirectTarget(formData: FormData, fallback: string) {
   const redirectTo = formData.get('redirectTo');
@@ -17,6 +18,30 @@ function redirectWithNotice(path: string, key: 'success' | 'error', message: str
   const target = new URL(path, 'http://localhost');
   target.searchParams.set(key, message);
   redirect(`${target.pathname}${target.search}`);
+}
+
+function buildStudentInsertPayload(data: z.infer<typeof studentSchema>) {
+  const parsedIdentity = parseStudentIdentity(data.studentNo);
+
+  if (!parsedIdentity) {
+    return null;
+  }
+
+  if (!isCampusEmailMatch(parsedIdentity.studentNo, data.campusEmail)) {
+    return null;
+  }
+
+  return {
+    studentNo: parsedIdentity.studentNo,
+    name: data.name.trim(),
+    campusEmail: parsedIdentity.campusEmail,
+    enrollmentYear: parsedIdentity.enrollmentYear,
+    schoolCode: parsedIdentity.schoolCode,
+    majorCode: parsedIdentity.majorCode,
+    classSerial: parsedIdentity.classSerial,
+    notes: data.notes ?? null,
+    status: 'active' as const,
+  };
 }
 
 const studentSchema = z.object({
@@ -44,22 +69,25 @@ export async function createStudentAction(formData: FormData) {
   }
 
   const data = parsed.data;
+  const payload = buildStudentInsertPayload(data);
+
+  if (!payload) {
+    redirectWithNotice(redirectTo, 'error', '学号或校园邮箱不合法');
+  }
 
   await db
     .insert(students)
-    .values({
-      studentNo: data.studentNo,
-      name: data.name,
-      campusEmail: data.campusEmail.toLowerCase(),
-      notes: data.notes ?? null,
-      status: 'active',
-    })
+    .values(payload)
     .onConflictDoUpdate({
       target: students.studentNo,
       set: {
-        name: data.name,
-        campusEmail: data.campusEmail.toLowerCase(),
-        notes: data.notes ?? null,
+        name: payload.name,
+        campusEmail: payload.campusEmail,
+        enrollmentYear: payload.enrollmentYear,
+        schoolCode: payload.schoolCode,
+        majorCode: payload.majorCode,
+        classSerial: payload.classSerial,
+        notes: payload.notes,
         updatedAt: new Date(),
       },
     });
@@ -102,22 +130,25 @@ export async function importStudentsCsvAction(formData: FormData) {
     }
 
     const data = parsed.data;
+    const payload = buildStudentInsertPayload(data);
+
+    if (!payload) {
+      redirectWithNotice(redirectTo, 'error', `导入失败：${line}`);
+    }
 
     await db
       .insert(students)
-      .values({
-        studentNo: data.studentNo,
-        name: data.name,
-        campusEmail: data.campusEmail.toLowerCase(),
-        notes: null,
-        status: 'active',
-      })
+      .values(payload)
       .onConflictDoUpdate({
         target: students.studentNo,
         set: {
-          name: data.name,
-          campusEmail: data.campusEmail.toLowerCase(),
-          notes: null,
+          name: payload.name,
+          campusEmail: payload.campusEmail,
+          enrollmentYear: payload.enrollmentYear,
+          schoolCode: payload.schoolCode,
+          majorCode: payload.majorCode,
+          classSerial: payload.classSerial,
+          notes: payload.notes,
           updatedAt: new Date(),
         },
       });

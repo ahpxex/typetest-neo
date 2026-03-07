@@ -19,16 +19,16 @@ export default async function RankingPage() {
         <header className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <p className="text-sm text-muted-foreground">当前文章：{currentArticle?.title ?? '未设置'}</p>
-            <h1 className="text-3xl font-semibold tracking-tight">排行榜</h1>
+            <h1 className="text-3xl font-semibold tracking-tight">正式考试排行榜</h1>
           </div>
           <div className="flex gap-3">
             <Badge variant="outline">当前登录：{student.name}</Badge>
-            <Button asChild variant="outline"><Link href="/typing">返回测试</Link></Button>
+            <Button asChild variant="outline"><Link href="/typing">返回首页</Link></Button>
           </div>
         </header>
 
         <Card>
-          <CardHeader><CardTitle>最佳成绩榜</CardTitle><CardDescription>每位学生按当前最佳成绩上榜。</CardDescription></CardHeader>
+          <CardHeader><CardTitle>最佳成绩榜</CardTitle><CardDescription>仅统计正式考试成绩，每位学生按当前最佳成绩上榜。</CardDescription></CardHeader>
           <CardContent>
             <Table>
               <TableHeader>

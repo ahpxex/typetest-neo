@@ -13,12 +13,14 @@ import {
   DialogTrigger,
 } from '@/components/ui/dialog'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { getAttemptModeLabel } from '@/lib/attempt-mode'
 import { formatDateTime, formatDurationSeconds, formatKpm, formatPercent } from '@/lib/format'
 import type { AdminStudentAttemptSummary, AdminStudentSummary } from '@/lib/data/queries'
 
 type AttemptResponse = {
   attempts: Array<{
     id: number;
+    mode: AdminStudentAttemptSummary['mode'];
     attemptNo: number;
     articleTitle: string;
     status: AdminStudentAttemptSummary['status'];
@@ -177,8 +179,8 @@ export function StudentScoresDialog({ student }: { student: AdminStudentSummary 
         <div className="grid gap-3 md:grid-cols-4">
           <MetricCard label="最佳速度" value={bestSpeed} />
           <MetricCard label="最佳准确率" value={bestAccuracy} />
-          <MetricCard label="已提交次数" value={`${student.submittedAttemptCount}`} />
-          <MetricCard label="总记录数" value={`${student.totalAttemptCount}`} />
+          <MetricCard label="考试次数" value={`${student.examAttemptCount}`} />
+          <MetricCard label="练习次数" value={`${student.practiceAttemptCount}`} />
         </div>
 
         {loading ? (
@@ -204,6 +206,7 @@ export function StudentScoresDialog({ student }: { student: AdminStudentSummary 
             <Table>
               <TableHeader>
                 <TableRow>
+                  <TableHead>模式</TableHead>
                   <TableHead>次数</TableHead>
                   <TableHead>文章</TableHead>
                   <TableHead>状态</TableHead>
@@ -217,6 +220,9 @@ export function StudentScoresDialog({ student }: { student: AdminStudentSummary 
               <TableBody>
                 {attempts.map((attempt) => (
                   <TableRow key={attempt.id}>
+                    <TableCell>
+                      <Badge variant={attempt.mode === 'exam' ? 'secondary' : 'outline'}>{getAttemptModeLabel(attempt.mode)}</Badge>
+                    </TableCell>
                     <TableCell>{attempt.attemptNo}</TableCell>
                     <TableCell className="max-w-[240px] truncate">{attempt.articleTitle}</TableCell>
                     <TableCell>

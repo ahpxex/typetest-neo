@@ -3,6 +3,7 @@ import { and, asc, count, desc, eq, inArray, like, or, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { adminUsers, articles, attempts, students } from '@/db/schema';
 import { MAX_ATTEMPTS_PER_STUDENT, TEST_DURATION_SECONDS } from '@/lib/env';
+import type { AttemptMode } from '@/lib/attempt-mode';
 
 type StudentIdentityInput = {
   studentNo: string;
@@ -27,10 +28,38 @@ export type LeaderboardEntry = {
   name: string;
   campusEmail: string;
   attemptId: number;
+  mode: AttemptMode;
   scoreKpm: number;
   accuracy: number;
   submittedAt: Date | null;
   attemptNo: number;
+};
+
+export type StudentRecentAttemptSummary = {
+  attemptId: number;
+  mode: AttemptMode;
+  articleTitle: string;
+  status: 'started' | 'submitted' | 'expired' | 'cancelled' | 'invalidated';
+  scoreKpm: number;
+  accuracy: number;
+  startedAt: Date;
+  submittedAt: Date | null;
+};
+
+export type StudentDashboardSnapshot = {
+  studentId: number;
+  studentNo: string;
+  studentName: string;
+  campusEmail: string;
+  enrollmentYear: string;
+  schoolCode: string;
+  majorCode: string;
+  bestPracticeScoreKpm: number | null;
+  bestPracticeAccuracy: number | null;
+  bestExamScoreKpm: number | null;
+  bestExamAccuracy: number | null;
+  practiceAttempts: StudentRecentAttemptSummary[];
+  examAttempts: StudentRecentAttemptSummary[];
 };
 
 function normalizedEmail(email: string) {
@@ -97,14 +126,26 @@ export type AdminStudentSummary = {
   studentNo: string;
   name: string;
   campusEmail: string;
+  enrollmentYear: string;
+  schoolCode: string;
+  majorCode: string;
   status: 'active' | 'inactive';
   notes: string | null;
+  lastLoginAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
   bestSubmittedScoreKpm: number | null;
   bestSubmittedAccuracy: number | null;
   submittedAttemptCount: number;
+  practiceAttemptCount: number;
+  examAttemptCount: number;
   totalAttemptCount: number;
+};
+
+export type AdminStudentFilterOptions = {
+  enrollmentYears: string[];
+  schoolCodes: string[];
+  majorCodes: string[];
 };
 
 export type AdminStudentsPage = {
@@ -117,6 +158,7 @@ export type AdminStudentsPage = {
 
 export type AdminStudentAttemptSummary = {
   id: number;
+  mode: AttemptMode;
   attemptNo: number;
   articleTitle: string;
   status: 'started' | 'submitted' | 'expired' | 'cancelled' | 'invalidated';
@@ -131,23 +173,86 @@ export type AdminStudentAttemptSummary = {
 
 export const ADMIN_STUDENTS_PAGE_SIZE = 100;
 
+function buildAdminStudentFilter({
+  search,
+  enrollmentYear,
+  schoolCode,
+  majorCode,
+}: {
+  search?: string;
+  enrollmentYear?: string;
+  schoolCode?: string;
+  majorCode?: string;
+}) {
+  const conditions = [];
+  const keyword = search?.trim();
+
+  if (keyword) {
+    conditions.push(
+      or(
+        like(students.studentNo, `%${keyword}%`),
+        like(students.name, `%${keyword}%`),
+        like(students.campusEmail, `%${keyword}%`),
+      ),
+    );
+  }
+
+  if (enrollmentYear?.trim()) {
+    conditions.push(eq(students.enrollmentYear, enrollmentYear.trim()));
+  }
+
+  if (schoolCode?.trim()) {
+    conditions.push(eq(students.schoolCode, schoolCode.trim()));
+  }
+
+  if (majorCode?.trim()) {
+    conditions.push(eq(students.majorCode, majorCode.trim()));
+  }
+
+  if (conditions.length === 0) {
+    return undefined;
+  }
+
+  if (conditions.length === 1) {
+    return conditions[0];
+  }
+
+  return and(...conditions);
+}
+
+export async function getAdminStudentFilterOptions(): Promise<AdminStudentFilterOptions> {
+  const rows = await db
+    .select({
+      enrollmentYear: students.enrollmentYear,
+      schoolCode: students.schoolCode,
+      majorCode: students.majorCode,
+    })
+    .from(students)
+    .orderBy(asc(students.enrollmentYear), asc(students.schoolCode), asc(students.majorCode));
+
+  return {
+    enrollmentYears: Array.from(new Set(rows.map((row) => row.enrollmentYear))).filter(Boolean),
+    schoolCodes: Array.from(new Set(rows.map((row) => row.schoolCode))).filter(Boolean),
+    majorCodes: Array.from(new Set(rows.map((row) => row.majorCode))).filter(Boolean),
+  };
+}
+
 export async function getAdminStudentsPage({
   search,
+  enrollmentYear,
+  schoolCode,
+  majorCode,
   page = 1,
   pageSize = ADMIN_STUDENTS_PAGE_SIZE,
 }: {
   search?: string;
+  enrollmentYear?: string;
+  schoolCode?: string;
+  majorCode?: string;
   page?: number;
   pageSize?: number;
 } = {}): Promise<AdminStudentsPage> {
-  const keyword = search?.trim();
-  const filter = keyword
-    ? or(
-        like(students.studentNo, `%${keyword}%`),
-        like(students.name, `%${keyword}%`),
-        like(students.campusEmail, `%${keyword}%`),
-      )
-    : undefined;
+  const filter = buildAdminStudentFilter({ search, enrollmentYear, schoolCode, majorCode });
 
   const totalRow = await db
     .select({ count: count() })
@@ -167,8 +272,12 @@ export async function getAdminStudentsPage({
       studentNo: students.studentNo,
       name: students.name,
       campusEmail: students.campusEmail,
+      enrollmentYear: students.enrollmentYear,
+      schoolCode: students.schoolCode,
+      majorCode: students.majorCode,
       status: students.status,
       notes: students.notes,
+      lastLoginAt: students.lastLoginAt,
       createdAt: students.createdAt,
       updatedAt: students.updatedAt,
     })
@@ -191,6 +300,7 @@ export async function getAdminStudentsPage({
   const attemptRows = await db
     .select({
       studentId: attempts.studentId,
+      mode: attempts.mode,
       status: attempts.status,
       scoreKpm: attempts.scoreKpm,
       accuracy: attempts.accuracy,
@@ -202,10 +312,12 @@ export async function getAdminStudentsPage({
 
   const statsByStudent = new Map<number, {
     bestSubmittedScoreKpm: number | null;
-    bestSubmittedAccuracy: number | null;
-    bestSubmittedAt: number | null;
-    submittedAttemptCount: number;
-    totalAttemptCount: number;
+      bestSubmittedAccuracy: number | null;
+      bestSubmittedAt: number | null;
+      submittedAttemptCount: number;
+      practiceAttemptCount: number;
+      examAttemptCount: number;
+      totalAttemptCount: number;
   }>();
 
   for (const attempt of attemptRows) {
@@ -214,12 +326,20 @@ export async function getAdminStudentsPage({
       bestSubmittedAccuracy: null,
       bestSubmittedAt: null,
       submittedAttemptCount: 0,
+      practiceAttemptCount: 0,
+      examAttemptCount: 0,
       totalAttemptCount: 0,
     };
 
     current.totalAttemptCount += 1;
 
-    if (attempt.status === 'submitted') {
+    if (attempt.mode === 'practice') {
+      current.practiceAttemptCount += 1;
+    } else {
+      current.examAttemptCount += 1;
+    }
+
+    if (attempt.status === 'submitted' && attempt.mode === 'exam') {
       current.submittedAttemptCount += 1;
       const submittedAtMs = attempt.submittedAt?.getTime() ?? 0;
       const shouldReplace =
@@ -251,6 +371,8 @@ export async function getAdminStudentsPage({
         bestSubmittedScoreKpm: stats?.bestSubmittedScoreKpm ?? null,
         bestSubmittedAccuracy: stats?.bestSubmittedAccuracy ?? null,
         submittedAttemptCount: stats?.submittedAttemptCount ?? 0,
+        practiceAttemptCount: stats?.practiceAttemptCount ?? 0,
+        examAttemptCount: stats?.examAttemptCount ?? 0,
         totalAttemptCount: stats?.totalAttemptCount ?? 0,
       } satisfies AdminStudentSummary;
     }),
@@ -271,6 +393,7 @@ export async function getAdminStudentAttemptSummaries(studentNo: string): Promis
   return db
     .select({
       id: attempts.id,
+      mode: attempts.mode,
       attemptNo: attempts.attemptNo,
       articleTitle: attempts.articleTitleSnapshot,
       status: attempts.status,
@@ -287,9 +410,144 @@ export async function getAdminStudentAttemptSummaries(studentNo: string): Promis
     .orderBy(desc(attempts.attemptNo), desc(attempts.createdAt));
 }
 
-export async function ensureAttemptForStudent(studentId: number) {
-  const [student, currentArticle] = await Promise.all([
+export async function getStudentDashboard(studentId: number): Promise<StudentDashboardSnapshot | null> {
+  const [student, recentAttempts] = await Promise.all([
     db.query.students.findFirst({ where: eq(students.id, studentId) }),
+    db
+      .select({
+        attemptId: attempts.id,
+        mode: attempts.mode,
+        articleTitle: attempts.articleTitleSnapshot,
+        status: attempts.status,
+        scoreKpm: attempts.scoreKpm,
+        accuracy: attempts.accuracy,
+        startedAt: attempts.startedAt,
+        submittedAt: attempts.submittedAt,
+      })
+      .from(attempts)
+      .where(eq(attempts.studentId, studentId))
+      .orderBy(desc(attempts.createdAt), desc(attempts.attemptNo))
+      .limit(12),
+  ]);
+
+  if (!student) {
+    return null;
+  }
+
+  let bestPracticeScoreKpm: number | null = null;
+  let bestPracticeAccuracy: number | null = null;
+  let bestExamScoreKpm: number | null = null;
+  let bestExamAccuracy: number | null = null;
+
+  const practiceAttempts: StudentRecentAttemptSummary[] = [];
+  const examAttempts: StudentRecentAttemptSummary[] = [];
+
+  for (const attempt of recentAttempts) {
+    if (attempt.mode === 'practice' && practiceAttempts.length < 5) {
+      practiceAttempts.push(attempt);
+    }
+
+    if (attempt.mode === 'exam' && examAttempts.length < 5) {
+      examAttempts.push(attempt);
+    }
+
+    if (attempt.status !== 'submitted') {
+      continue;
+    }
+
+    if (attempt.mode === 'practice') {
+      const shouldReplace =
+        bestPracticeScoreKpm === null
+        || attempt.scoreKpm > bestPracticeScoreKpm
+        || (attempt.scoreKpm === bestPracticeScoreKpm && attempt.accuracy > (bestPracticeAccuracy ?? 0));
+
+      if (shouldReplace) {
+        bestPracticeScoreKpm = attempt.scoreKpm;
+        bestPracticeAccuracy = attempt.accuracy;
+      }
+
+      continue;
+    }
+
+    const shouldReplace =
+      bestExamScoreKpm === null
+      || attempt.scoreKpm > bestExamScoreKpm
+      || (attempt.scoreKpm === bestExamScoreKpm && attempt.accuracy > (bestExamAccuracy ?? 0));
+
+    if (shouldReplace) {
+      bestExamScoreKpm = attempt.scoreKpm;
+      bestExamAccuracy = attempt.accuracy;
+    }
+  }
+
+  return {
+    studentId: student.id,
+    studentNo: student.studentNo,
+    studentName: student.name,
+    campusEmail: student.campusEmail,
+    enrollmentYear: student.enrollmentYear,
+    schoolCode: student.schoolCode,
+    majorCode: student.majorCode,
+    bestPracticeScoreKpm,
+    bestPracticeAccuracy,
+    bestExamScoreKpm,
+    bestExamAccuracy,
+    practiceAttempts,
+    examAttempts,
+  };
+}
+
+export async function ensureAttemptForStudent(studentId: number, mode: AttemptMode) {
+  const [student, latestStartedAttempt, latestModeAttempt, currentArticle] = await Promise.all([
+    db.query.students.findFirst({ where: eq(students.id, studentId) }),
+    db
+      .select({
+        id: attempts.id,
+        studentId: attempts.studentId,
+        articleId: attempts.articleId,
+        mode: attempts.mode,
+        attemptNo: attempts.attemptNo,
+        status: attempts.status,
+        studentNoSnapshot: attempts.studentNoSnapshot,
+        studentNameSnapshot: attempts.studentNameSnapshot,
+        campusEmailSnapshot: attempts.campusEmailSnapshot,
+        articleTitleSnapshot: attempts.articleTitleSnapshot,
+        startedAt: attempts.startedAt,
+        submittedAt: attempts.submittedAt,
+        durationSecondsAllocated: attempts.durationSecondsAllocated,
+        durationSecondsUsed: attempts.durationSecondsUsed,
+        typedTextRaw: attempts.typedTextRaw,
+        typedTextNormalized: attempts.typedTextNormalized,
+        charCountTyped: attempts.charCountTyped,
+        charCountCorrect: attempts.charCountCorrect,
+        charCountError: attempts.charCountError,
+        backspaceCount: attempts.backspaceCount,
+        pasteCount: attempts.pasteCount,
+        suspicionFlags: attempts.suspicionFlags,
+        clientMeta: attempts.clientMeta,
+        scoreKpm: attempts.scoreKpm,
+        accuracy: attempts.accuracy,
+        scoreVersion: attempts.scoreVersion,
+        ipAddress: attempts.ipAddress,
+        userAgent: attempts.userAgent,
+        createdAt: attempts.createdAt,
+        updatedAt: attempts.updatedAt,
+        title: articles.title,
+        slug: articles.slug,
+        language: articles.language,
+        articleStatus: articles.status,
+        contentRaw: articles.contentRaw,
+        source: articles.source,
+      })
+      .from(attempts)
+      .innerJoin(articles, eq(articles.id, attempts.articleId))
+      .where(and(eq(attempts.studentId, studentId), eq(attempts.mode, mode), eq(attempts.status, 'started')))
+      .orderBy(desc(attempts.createdAt), desc(attempts.attemptNo))
+      .get(),
+    db.query.attempts.findFirst({
+      where: and(eq(attempts.studentId, studentId), eq(attempts.mode, mode)),
+      orderBy: [desc(attempts.attemptNo), desc(attempts.createdAt)],
+    }),
     getCurrentRotatingArticle(),
   ]);
 
@@ -297,21 +555,55 @@ export async function ensureAttemptForStudent(studentId: number) {
     return { state: 'missing-student' as const };
   }
 
-  if (!currentArticle) {
-    return { state: 'no-article' as const };
-  }
-
-  const latestAttempt = await db.query.attempts.findFirst({
-    where: eq(attempts.studentId, studentId),
-    orderBy: [desc(attempts.attemptNo), desc(attempts.createdAt)],
-  });
-
-  if (latestAttempt?.status === 'started') {
+  if (latestStartedAttempt) {
     return {
       state: 'ready' as const,
-      article: currentArticle,
-      attempt: latestAttempt,
+      article: {
+        articleId: latestStartedAttempt.articleId,
+        title: latestStartedAttempt.title,
+        slug: latestStartedAttempt.slug,
+        language: latestStartedAttempt.language,
+        status: latestStartedAttempt.articleStatus,
+        contentRaw: latestStartedAttempt.contentRaw,
+        source: latestStartedAttempt.source,
+      },
+      attempt: {
+        id: latestStartedAttempt.id,
+        studentId: latestStartedAttempt.studentId,
+        articleId: latestStartedAttempt.articleId,
+        mode: latestStartedAttempt.mode,
+        attemptNo: latestStartedAttempt.attemptNo,
+        status: latestStartedAttempt.status,
+        studentNoSnapshot: latestStartedAttempt.studentNoSnapshot,
+        studentNameSnapshot: latestStartedAttempt.studentNameSnapshot,
+        campusEmailSnapshot: latestStartedAttempt.campusEmailSnapshot,
+        articleTitleSnapshot: latestStartedAttempt.articleTitleSnapshot,
+        startedAt: latestStartedAttempt.startedAt,
+        submittedAt: latestStartedAttempt.submittedAt,
+        durationSecondsAllocated: latestStartedAttempt.durationSecondsAllocated,
+        durationSecondsUsed: latestStartedAttempt.durationSecondsUsed,
+        typedTextRaw: latestStartedAttempt.typedTextRaw,
+        typedTextNormalized: latestStartedAttempt.typedTextNormalized,
+        charCountTyped: latestStartedAttempt.charCountTyped,
+        charCountCorrect: latestStartedAttempt.charCountCorrect,
+        charCountError: latestStartedAttempt.charCountError,
+        backspaceCount: latestStartedAttempt.backspaceCount,
+        pasteCount: latestStartedAttempt.pasteCount,
+        suspicionFlags: latestStartedAttempt.suspicionFlags,
+        clientMeta: latestStartedAttempt.clientMeta,
+        scoreKpm: latestStartedAttempt.scoreKpm,
+        accuracy: latestStartedAttempt.accuracy,
+        scoreVersion: latestStartedAttempt.scoreVersion,
+        ipAddress: latestStartedAttempt.ipAddress,
+        userAgent: latestStartedAttempt.userAgent,
+        createdAt: latestStartedAttempt.createdAt,
+        updatedAt: latestStartedAttempt.updatedAt,
+      },
     };
+  }
+
+  if (!currentArticle) {
+    return { state: 'no-article' as const };
   }
 
   const totalAttempts = await db
@@ -322,11 +614,11 @@ export async function ensureAttemptForStudent(studentId: number) {
 
   const usedAttempts = totalAttempts?.count ?? 0;
 
-  if (usedAttempts >= MAX_ATTEMPTS_PER_STUDENT) {
+  if (mode === 'exam' && usedAttempts >= MAX_ATTEMPTS_PER_STUDENT) {
     return {
       state: 'locked' as const,
       article: currentArticle,
-      latestAttempt,
+      latestAttempt: latestModeAttempt,
     };
   }
 
@@ -335,6 +627,7 @@ export async function ensureAttemptForStudent(studentId: number) {
   await db.insert(attempts).values({
     studentId: student.id,
     articleId: currentArticle.articleId,
+    mode,
     attemptNo,
     status: 'started',
     studentNoSnapshot: student.studentNo,
@@ -364,6 +657,7 @@ export async function getAttemptDetail(attemptId: number) {
     .select({
       attemptId: attempts.id,
       articleId: attempts.articleId,
+      mode: attempts.mode,
       articleTitle: attempts.articleTitleSnapshot,
       studentId: attempts.studentId,
       studentNo: attempts.studentNoSnapshot,
@@ -400,13 +694,14 @@ export async function getLeaderboard(): Promise<LeaderboardEntry[]> {
       studentNo: attempts.studentNoSnapshot,
       studentName: attempts.studentNameSnapshot,
       campusEmail: attempts.campusEmailSnapshot,
+      mode: attempts.mode,
       scoreKpm: attempts.scoreKpm,
       accuracy: attempts.accuracy,
       submittedAt: attempts.submittedAt,
       attemptNo: attempts.attemptNo,
     })
     .from(attempts)
-    .where(eq(attempts.status, 'submitted'))
+    .where(and(eq(attempts.status, 'submitted'), eq(attempts.mode, 'exam')))
     .orderBy(desc(attempts.scoreKpm), desc(attempts.accuracy), asc(attempts.submittedAt));
 
   const bestByStudent = new Map<number, LeaderboardEntry>();
@@ -420,6 +715,7 @@ export async function getLeaderboard(): Promise<LeaderboardEntry[]> {
       name: row.studentName,
       campusEmail: row.campusEmail,
       attemptId: row.attemptId,
+      mode: row.mode,
       scoreKpm: row.scoreKpm,
       accuracy: row.accuracy,
       submittedAt: row.submittedAt,
@@ -462,6 +758,10 @@ export async function getExportRows() {
       studentNo: attempts.studentNoSnapshot,
       studentName: attempts.studentNameSnapshot,
       campusEmail: attempts.campusEmailSnapshot,
+      enrollmentYear: students.enrollmentYear,
+      schoolCode: students.schoolCode,
+      majorCode: students.majorCode,
+      mode: attempts.mode,
       articleTitle: attempts.articleTitleSnapshot,
       scoreKpm: attempts.scoreKpm,
       accuracy: attempts.accuracy,
@@ -475,5 +775,6 @@ export async function getExportRows() {
       ipAddress: attempts.ipAddress,
     })
     .from(attempts)
+    .leftJoin(students, eq(students.id, attempts.studentId))
     .orderBy(desc(attempts.createdAt));
 }
