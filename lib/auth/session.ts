@@ -30,6 +30,19 @@ function hashToken(token: string) {
   return createHash('sha256').update(token).digest('hex');
 }
 
+function isIgnorableSessionReadError(error: unknown) {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  const message = error.message.toLowerCase();
+
+  return message.includes('no such table: sessions')
+    || message.includes('no such table')
+    || message.includes('unable to open database file')
+    || message.includes('database is locked');
+}
+
 async function revokeSessionRecord(tokenHash: string) {
   await db.delete(sessions).where(eq(sessions.tokenHash, tokenHash));
 }
@@ -78,25 +91,35 @@ async function readSessionByType(userType: SessionUserType): Promise<AppSession 
 
   const tokenHash = hashToken(token);
   const now = new Date();
-  const sessionRecord = await db.query.sessions.findFirst({
-    where: and(
-      eq(sessions.userType, userType),
-      eq(sessions.tokenHash, tokenHash),
-      gt(sessions.expiresAt, now),
-    ),
-  });
 
-  if (!sessionRecord) {
+  try {
+    const sessionRecord = await db.query.sessions.findFirst({
+      where: and(
+        eq(sessions.userType, userType),
+        eq(sessions.tokenHash, tokenHash),
+        gt(sessions.expiresAt, now),
+      ),
+    });
+
+    if (!sessionRecord) {
+      return null;
+    }
+
+    return {
+      id: sessionRecord.id,
+      userType: sessionRecord.userType,
+      userId: sessionRecord.userId,
+      expiresAt: sessionRecord.expiresAt,
+      tokenHash: sessionRecord.tokenHash,
+    };
+  } catch (error) {
+    if (!isIgnorableSessionReadError(error)) {
+      throw error;
+    }
+
+    console.error(`[auth] Failed to read ${userType} session from SQLite`, error);
     return null;
   }
-
-  return {
-    id: sessionRecord.id,
-    userType: sessionRecord.userType,
-    userId: sessionRecord.userId,
-    expiresAt: sessionRecord.expiresAt,
-    tokenHash: sessionRecord.tokenHash,
-  };
 }
 
 export async function readStudentSession() {
