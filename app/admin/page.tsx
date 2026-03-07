@@ -16,25 +16,47 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Textarea } from '@/components/ui/textarea'
+import { StudentScoresDialog } from '@/components/admin/student-scores-dialog'
 import { createStudentAction, importStudentsCsvAction, updateStudentStatusAction } from '@/features/admin/actions'
-import { getStudentsList } from '@/lib/data/queries'
-import { formatDateTime, formatDurationSeconds, formatKpm, formatPercent } from '@/lib/format'
+import { ADMIN_STUDENTS_PAGE_SIZE, getAdminStudentsPage } from '@/lib/data/queries'
+import { formatDateTime, formatKpm, formatPercent } from '@/lib/format'
 import { AppSearchParams, getSearchParamValue } from '@/lib/search-params'
+
+function buildAdminHref(query: string, page: number) {
+  const params = new URLSearchParams()
+
+  if (query) {
+    params.set('query', query)
+  }
+
+  if (page > 1) {
+    params.set('page', String(page))
+  }
+
+  const search = params.toString()
+  return search ? `/admin?${search}` : '/admin'
+}
 
 export default async function AdminPage({ searchParams }: { searchParams?: AppSearchParams }) {
   const params = (await searchParams) ?? {}
   const success = getSearchParamValue(params.success)
   const error = getSearchParamValue(params.error)
   const query = getSearchParamValue(params.query) ?? ''
-  const redirectTo = `/admin${query ? `?query=${encodeURIComponent(query)}` : ''}`
-  const students = await getStudentsList(query)
+  const pageParam = Number.parseInt(getSearchParamValue(params.page) ?? '1', 10)
+  const page = Number.isFinite(pageParam) && pageParam > 0 ? pageParam : 1
+  const redirectTo = buildAdminHref(query, page)
+  const studentPage = await getAdminStudentsPage({ search: query, page, pageSize: ADMIN_STUDENTS_PAGE_SIZE })
+  const rangeStart = studentPage.total === 0 ? 0 : (studentPage.page - 1) * studentPage.pageSize + 1
+  const rangeEnd = Math.min(studentPage.total, studentPage.page * studentPage.pageSize)
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-hidden">
       <header className="flex shrink-0 flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight md:text-3xl">学生管理</h1>
-          <p className="mt-1 text-sm text-muted-foreground">共 {students.length} 名学生 · 行内展示最佳速度，详细成绩通过弹窗查看。</p>
+          <p className="mt-1 text-sm text-muted-foreground">
+            共 {studentPage.total} 名学生 · 当前显示 {rangeStart}-{rangeEnd} · 每页 {studentPage.pageSize} 条
+          </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <Button asChild variant="outline">
@@ -78,7 +100,7 @@ export default async function AdminPage({ searchParams }: { searchParams?: AppSe
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {students.map((student) => (
+                {studentPage.items.map((student) => (
                   <TableRow key={student.id}>
                     <TableCell>
                       <p className="font-medium">{student.name}</p>
@@ -119,89 +141,20 @@ export default async function AdminPage({ searchParams }: { searchParams?: AppSe
               </TableBody>
             </Table>
           </div>
+
+          <div className="mt-3 flex shrink-0 items-center justify-between gap-3 text-sm text-muted-foreground">
+            <p>第 {studentPage.page} / {studentPage.totalPages} 页</p>
+            <div className="flex items-center gap-2">
+              <Button asChild variant="outline" size="sm" disabled={studentPage.page <= 1}>
+                <Link href={buildAdminHref(query, Math.max(1, studentPage.page - 1))}>上一页</Link>
+              </Button>
+              <Button asChild variant="outline" size="sm" disabled={studentPage.page >= studentPage.totalPages}>
+                <Link href={buildAdminHref(query, Math.min(studentPage.totalPages, studentPage.page + 1))}>下一页</Link>
+              </Button>
+            </div>
+          </div>
         </CardContent>
       </Card>
-    </div>
-  )
-}
-
-function StudentScoresDialog({ student }: { student: Awaited<ReturnType<typeof getStudentsList>>[number] }) {
-  return (
-    <Dialog>
-      <DialogTrigger asChild>
-        <Button variant="outline" size="sm">查看成绩</Button>
-      </DialogTrigger>
-      <DialogContent className="sm:max-w-5xl">
-        <DialogHeader>
-          <DialogTitle>{student.name} · 成绩详情</DialogTitle>
-          <DialogDescription>{student.studentNo} · {student.campusEmail}</DialogDescription>
-        </DialogHeader>
-
-        <div className="grid gap-3 md:grid-cols-4">
-          <MetricCard label="最佳速度" value={student.bestSubmittedScoreKpm === null ? '—' : formatKpm(student.bestSubmittedScoreKpm)} />
-          <MetricCard label="最佳准确率" value={student.bestSubmittedAccuracy === null ? '—' : formatPercent(student.bestSubmittedAccuracy)} />
-          <MetricCard label="已提交次数" value={`${student.submittedAttemptCount}`} />
-          <MetricCard label="总记录数" value={`${student.totalAttemptCount}`} />
-        </div>
-
-        {student.attempts.length === 0 ? (
-          <div className="rounded-lg border border-dashed border-border px-4 py-10 text-center text-sm text-muted-foreground">
-            该学生还没有成绩记录。
-          </div>
-        ) : (
-          <div className="max-h-[60vh] overflow-auto rounded-lg border border-border">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>次数</TableHead>
-                  <TableHead>文章</TableHead>
-                  <TableHead>状态</TableHead>
-                  <TableHead>速度</TableHead>
-                  <TableHead>正确率</TableHead>
-                  <TableHead>用时</TableHead>
-                  <TableHead>提交时间</TableHead>
-                  <TableHead>异常</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {student.attempts.map((attempt) => (
-                  <TableRow key={attempt.id}>
-                    <TableCell>{attempt.attemptNo}</TableCell>
-                    <TableCell className="max-w-[240px] truncate">{attempt.articleTitle}</TableCell>
-                    <TableCell>
-                      <Badge variant={attempt.status === 'submitted' ? 'secondary' : 'outline'}>{attempt.status}</Badge>
-                    </TableCell>
-                    <TableCell>{attempt.status === 'submitted' ? formatKpm(attempt.scoreKpm) : '—'}</TableCell>
-                    <TableCell>{attempt.status === 'submitted' ? formatPercent(attempt.accuracy) : '—'}</TableCell>
-                    <TableCell>{attempt.durationSecondsUsed ? formatDurationSeconds(attempt.durationSecondsUsed) : formatDurationSeconds(attempt.durationSecondsAllocated)}</TableCell>
-                    <TableCell>{formatDateTime(attempt.submittedAt ?? attempt.startedAt)}</TableCell>
-                    <TableCell>
-                      {attempt.suspicionFlags.length === 0 ? (
-                        <span className="text-sm text-muted-foreground">—</span>
-                      ) : (
-                        <div className="space-y-1">
-                          {attempt.suspicionFlags.map((flag) => (
-                            <Badge key={flag} variant="outline">{flag}</Badge>
-                          ))}
-                        </div>
-                      )}
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
-        )}
-      </DialogContent>
-    </Dialog>
-  )
-}
-
-function MetricCard({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-lg border border-border bg-muted/30 px-4 py-3">
-      <p className="text-xs text-muted-foreground">{label}</p>
-      <p className="mt-1 text-lg font-semibold">{value}</p>
     </div>
   )
 }

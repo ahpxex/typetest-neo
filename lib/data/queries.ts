@@ -92,7 +92,54 @@ export async function getAdminByUsername(username: string) {
   });
 }
 
-export async function getStudentsList(search?: string) {
+export type AdminStudentSummary = {
+  id: number;
+  studentNo: string;
+  name: string;
+  campusEmail: string;
+  status: 'active' | 'inactive';
+  notes: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+  bestSubmittedScoreKpm: number | null;
+  bestSubmittedAccuracy: number | null;
+  submittedAttemptCount: number;
+  totalAttemptCount: number;
+};
+
+export type AdminStudentsPage = {
+  items: AdminStudentSummary[];
+  total: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
+};
+
+export type AdminStudentAttemptSummary = {
+  id: number;
+  attemptNo: number;
+  articleTitle: string;
+  status: 'started' | 'submitted' | 'expired' | 'cancelled' | 'invalidated';
+  scoreKpm: number;
+  accuracy: number;
+  startedAt: Date;
+  submittedAt: Date | null;
+  durationSecondsAllocated: number;
+  durationSecondsUsed: number | null;
+  suspicionFlags: string[];
+};
+
+export const ADMIN_STUDENTS_PAGE_SIZE = 100;
+
+export async function getAdminStudentsPage({
+  search,
+  page = 1,
+  pageSize = ADMIN_STUDENTS_PAGE_SIZE,
+}: {
+  search?: string;
+  page?: number;
+  pageSize?: number;
+} = {}): Promise<AdminStudentsPage> {
   const keyword = search?.trim();
   const filter = keyword
     ? or(
@@ -101,6 +148,18 @@ export async function getStudentsList(search?: string) {
         like(students.campusEmail, `%${keyword}%`),
       )
     : undefined;
+
+  const totalRow = await db
+    .select({ count: count() })
+    .from(students)
+    .where(filter)
+    .get();
+
+  const total = totalRow?.count ?? 0;
+  const safePageSize = Math.max(1, Math.floor(pageSize));
+  const totalPages = Math.max(1, Math.ceil(total / safePageSize));
+  const resolvedPage = Math.min(Math.max(1, Math.floor(page)), totalPages);
+  const offset = (resolvedPage - 1) * safePageSize;
 
   const studentRows = await db
     .select({
@@ -115,16 +174,97 @@ export async function getStudentsList(search?: string) {
     })
     .from(students)
     .where(filter)
-    .orderBy(desc(students.createdAt), asc(students.studentNo));
+    .orderBy(desc(students.createdAt), asc(students.studentNo))
+    .limit(safePageSize)
+    .offset(offset);
 
   if (studentRows.length === 0) {
-    return [];
+    return {
+      items: [],
+      total,
+      page: resolvedPage,
+      pageSize: safePageSize,
+      totalPages,
+    };
   }
 
   const attemptRows = await db
     .select({
-      id: attempts.id,
       studentId: attempts.studentId,
+      status: attempts.status,
+      scoreKpm: attempts.scoreKpm,
+      accuracy: attempts.accuracy,
+      submittedAt: attempts.submittedAt,
+    })
+    .from(attempts)
+    .where(inArray(attempts.studentId, studentRows.map((student) => student.id)))
+    .orderBy(desc(attempts.createdAt), desc(attempts.attemptNo));
+
+  const statsByStudent = new Map<number, {
+    bestSubmittedScoreKpm: number | null;
+    bestSubmittedAccuracy: number | null;
+    bestSubmittedAt: number | null;
+    submittedAttemptCount: number;
+    totalAttemptCount: number;
+  }>();
+
+  for (const attempt of attemptRows) {
+    const current = statsByStudent.get(attempt.studentId) ?? {
+      bestSubmittedScoreKpm: null,
+      bestSubmittedAccuracy: null,
+      bestSubmittedAt: null,
+      submittedAttemptCount: 0,
+      totalAttemptCount: 0,
+    };
+
+    current.totalAttemptCount += 1;
+
+    if (attempt.status === 'submitted') {
+      current.submittedAttemptCount += 1;
+      const submittedAtMs = attempt.submittedAt?.getTime() ?? 0;
+      const shouldReplace =
+        current.bestSubmittedScoreKpm === null
+        || attempt.scoreKpm > current.bestSubmittedScoreKpm
+        || (attempt.scoreKpm === current.bestSubmittedScoreKpm
+          && (attempt.accuracy > (current.bestSubmittedAccuracy ?? 0)
+            || (
+              attempt.accuracy === (current.bestSubmittedAccuracy ?? 0)
+              && submittedAtMs < (current.bestSubmittedAt ?? Number.POSITIVE_INFINITY)
+            )));
+
+      if (shouldReplace) {
+        current.bestSubmittedScoreKpm = attempt.scoreKpm;
+        current.bestSubmittedAccuracy = attempt.accuracy;
+        current.bestSubmittedAt = submittedAtMs;
+      }
+    }
+
+    statsByStudent.set(attempt.studentId, current);
+  }
+
+  return {
+    items: studentRows.map((student) => {
+      const stats = statsByStudent.get(student.id);
+
+      return {
+        ...student,
+        bestSubmittedScoreKpm: stats?.bestSubmittedScoreKpm ?? null,
+        bestSubmittedAccuracy: stats?.bestSubmittedAccuracy ?? null,
+        submittedAttemptCount: stats?.submittedAttemptCount ?? 0,
+        totalAttemptCount: stats?.totalAttemptCount ?? 0,
+      } satisfies AdminStudentSummary;
+    }),
+    total,
+    page: resolvedPage,
+    pageSize: safePageSize,
+    totalPages,
+  };
+}
+
+export async function getAdminStudentAttemptSummaries(studentId: number): Promise<AdminStudentAttemptSummary[]> {
+  return db
+    .select({
+      id: attempts.id,
       attemptNo: attempts.attemptNo,
       articleTitle: attempts.articleTitleSnapshot,
       status: attempts.status,
@@ -134,68 +274,11 @@ export async function getStudentsList(search?: string) {
       submittedAt: attempts.submittedAt,
       durationSecondsAllocated: attempts.durationSecondsAllocated,
       durationSecondsUsed: attempts.durationSecondsUsed,
-      charCountError: attempts.charCountError,
-      backspaceCount: attempts.backspaceCount,
-      pasteCount: attempts.pasteCount,
       suspicionFlags: attempts.suspicionFlags,
     })
     .from(attempts)
-    .where(inArray(attempts.studentId, studentRows.map((student) => student.id)))
-    .orderBy(desc(attempts.createdAt), desc(attempts.attemptNo));
-
-  const attemptsByStudent = new Map<number, typeof attemptRows>();
-
-  for (const attempt of attemptRows) {
-    const existing = attemptsByStudent.get(attempt.studentId);
-
-    if (existing) {
-      existing.push(attempt);
-      continue;
-    }
-
-    attemptsByStudent.set(attempt.studentId, [attempt]);
-  }
-
-  return studentRows.map((student) => {
-    const studentAttempts = attemptsByStudent.get(student.id) ?? [];
-    let bestSubmittedAttempt: (typeof studentAttempts)[number] | null = null;
-    let submittedAttemptCount = 0;
-
-    for (const attempt of studentAttempts) {
-      if (attempt.status !== 'submitted') {
-        continue;
-      }
-
-      submittedAttemptCount += 1;
-
-      if (!bestSubmittedAttempt) {
-        bestSubmittedAttempt = attempt;
-        continue;
-      }
-
-      const shouldReplace =
-        attempt.scoreKpm > bestSubmittedAttempt.scoreKpm
-        || (attempt.scoreKpm === bestSubmittedAttempt.scoreKpm && attempt.accuracy > bestSubmittedAttempt.accuracy)
-        || (
-          attempt.scoreKpm === bestSubmittedAttempt.scoreKpm
-          && attempt.accuracy === bestSubmittedAttempt.accuracy
-          && (attempt.submittedAt?.getTime() ?? 0) < (bestSubmittedAttempt.submittedAt?.getTime() ?? 0)
-        );
-
-      if (shouldReplace) {
-        bestSubmittedAttempt = attempt;
-      }
-    }
-
-    return {
-      ...student,
-      bestSubmittedScoreKpm: bestSubmittedAttempt?.scoreKpm ?? null,
-      bestSubmittedAccuracy: bestSubmittedAttempt?.accuracy ?? null,
-      submittedAttemptCount,
-      totalAttemptCount: studentAttempts.length,
-      attempts: studentAttempts,
-    };
-  });
+    .where(eq(attempts.studentId, studentId))
+    .orderBy(desc(attempts.attemptNo), desc(attempts.createdAt));
 }
 
 export async function ensureAttemptForStudent(studentId: number) {
