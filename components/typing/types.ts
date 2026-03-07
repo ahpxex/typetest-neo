@@ -19,6 +19,7 @@ export type TypingViewportProps = {
   typedChars: string[];
   currentCharIndex: number;
   visibleLines: LineSegment[];
+  isLineMeasureReady: boolean;
   hiddenInputRef: React.RefObject<HTMLTextAreaElement | null>;
   textMeasureRef: React.RefObject<HTMLDivElement | null>;
   onInputValue: (value: string) => void;

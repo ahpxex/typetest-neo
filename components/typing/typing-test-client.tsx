@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 
 import { calculateStrictAccuracy, calculateTypingMetricsPrepared, normalizeTypingText } from '@/modules/typing-engine';
@@ -128,7 +128,6 @@ export function TypingTestClient({
   const startedAtMs = new Date(startedAt).getTime();
   const submitLockRef = useRef(false);
   const hiddenInputRef = useRef<HTMLTextAreaElement | null>(null);
-  const containerRef = useRef<HTMLDivElement | null>(null);
   const textMeasureRef = useRef<HTMLDivElement | null>(null);
   const saveTimerRef = useRef<number | null>(null);
   const frameRef = useRef<number | null>(null);
@@ -148,6 +147,7 @@ export function TypingTestClient({
     width: 960,
     glyphWidth: ESTIMATED_GLYPH_WIDTH,
   });
+  const [isLineMeasureReady, setIsLineMeasureReady] = useState(false);
   const [isDevTimerPaused, setIsDevTimerPaused] = useState(isDevelopment);
   const [devElapsedMs, setDevElapsedMs] = useState(0);
   const devResumeStartedAtRef = useRef<number | null>(null);
@@ -213,7 +213,7 @@ export function TypingTestClient({
     hiddenInputRef.current?.focus();
   }, []);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!textMeasureRef.current) {
       return;
     }
@@ -253,6 +253,7 @@ export function TypingTestClient({
 
         return { width, glyphWidth };
       });
+      setIsLineMeasureReady(true);
     };
 
     measure();
@@ -445,7 +446,7 @@ export function TypingTestClient({
   }, [referenceChars]);
 
   return (
-    <div ref={containerRef} className="relative flex min-h-0 flex-1 flex-col overflow-hidden pb-24 md:pb-28">
+    <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden pb-24 md:pb-28">
       <TypingViewport
         articleTitle={articleTitle}
         renderedText={renderedText}
@@ -453,6 +454,7 @@ export function TypingTestClient({
         typedChars={typedChars}
         currentCharIndex={currentCharIndex}
         visibleLines={visibleLines}
+        isLineMeasureReady={isLineMeasureReady}
         hiddenInputRef={hiddenInputRef}
         textMeasureRef={textMeasureRef}
         onInputValue={handleInputValue}

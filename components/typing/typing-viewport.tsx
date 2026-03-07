@@ -12,6 +12,7 @@ export const TypingViewport = memo(function TypingViewport({
   typedChars,
   currentCharIndex,
   visibleLines,
+  isLineMeasureReady,
   hiddenInputRef,
   textMeasureRef,
   onInputValue,
@@ -55,7 +56,10 @@ export const TypingViewport = memo(function TypingViewport({
 
         <div
           ref={textMeasureRef}
-          className="mx-auto w-full max-w-[1400px] text-center font-mono text-[1.18rem] leading-[1.95] tracking-[0.01em] text-zinc-400/60 md:text-[1.55rem] md:leading-[1.85]"
+          className={cn(
+            'mx-auto w-full max-w-[1400px] text-center font-mono text-[1.18rem] leading-[1.95] tracking-[0.01em] text-zinc-400/60 transition-opacity md:text-[1.55rem] md:leading-[1.85]',
+            !isLineMeasureReady && 'opacity-0',
+          )}
         >
           {!isFocused && renderedText.length === 0 ? (
             <div className="mb-8 text-center text-xs uppercase tracking-[0.2em] text-muted-foreground">
