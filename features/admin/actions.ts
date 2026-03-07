@@ -6,7 +6,7 @@ import { redirect } from 'next/navigation';
 import { z } from 'zod';
 
 import { db } from '@/db/client';
-import { attempts, students } from '@/db/schema';
+import { students } from '@/db/schema';
 
 function getRedirectTarget(formData: FormData, fallback: string) {
   const redirectTo = formData.get('redirectTo');
@@ -29,8 +29,6 @@ const studentSchema = z.object({
     .refine((value) => value.toLowerCase().endsWith('@ucass.edu.cn'), '校园邮箱必须以 @ucass.edu.cn 结尾'),
   notes: z.string().trim().optional(),
 });
-
-const attemptStatusSchema = z.enum(['submitted', 'invalidated']);
 
 export async function createStudentAction(formData: FormData) {
   const redirectTo = getRedirectTarget(formData, '/admin/students');
@@ -119,7 +117,7 @@ export async function importStudentsCsvAction(formData: FormData) {
         set: {
           name: data.name,
           campusEmail: data.campusEmail.toLowerCase(),
-            notes: null,
+          notes: null,
           updatedAt: new Date(),
         },
       });
@@ -144,21 +142,4 @@ export async function updateStudentStatusAction(formData: FormData) {
 
   revalidatePath('/admin/students');
   redirectWithNotice(redirectTo, 'success', '学生状态已更新');
-}
-
-export async function setAttemptStatusAction(formData: FormData) {
-  const redirectTo = getRedirectTarget(formData, '/admin/attempts');
-  const attemptId = z.coerce.number().int().positive().parse(formData.get('attemptId'));
-  const status = attemptStatusSchema.parse(formData.get('status'));
-
-  await db
-    .update(attempts)
-    .set({
-      status,
-      updatedAt: new Date(),
-    })
-    .where(eq(attempts.id, attemptId));
-
-  revalidatePath('/admin/attempts');
-  redirectWithNotice(redirectTo, 'success', '成绩状态已更新');
 }

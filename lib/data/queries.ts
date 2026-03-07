@@ -1,4 +1,4 @@
-import { and, asc, count, desc, eq, like, or, sql } from 'drizzle-orm';
+import { and, asc, count, desc, eq, inArray, like, or, sql } from 'drizzle-orm';
 
 import { db } from '@/db/client';
 import { adminUsers, articles, attempts, students } from '@/db/schema';
@@ -102,7 +102,7 @@ export async function getStudentsList(search?: string) {
       )
     : undefined;
 
-  return db
+  const studentRows = await db
     .select({
       id: students.id,
       studentNo: students.studentNo,
@@ -116,6 +116,86 @@ export async function getStudentsList(search?: string) {
     .from(students)
     .where(filter)
     .orderBy(desc(students.createdAt), asc(students.studentNo));
+
+  if (studentRows.length === 0) {
+    return [];
+  }
+
+  const attemptRows = await db
+    .select({
+      id: attempts.id,
+      studentId: attempts.studentId,
+      attemptNo: attempts.attemptNo,
+      articleTitle: attempts.articleTitleSnapshot,
+      status: attempts.status,
+      scoreKpm: attempts.scoreKpm,
+      accuracy: attempts.accuracy,
+      startedAt: attempts.startedAt,
+      submittedAt: attempts.submittedAt,
+      durationSecondsAllocated: attempts.durationSecondsAllocated,
+      durationSecondsUsed: attempts.durationSecondsUsed,
+      charCountError: attempts.charCountError,
+      backspaceCount: attempts.backspaceCount,
+      pasteCount: attempts.pasteCount,
+      suspicionFlags: attempts.suspicionFlags,
+    })
+    .from(attempts)
+    .where(inArray(attempts.studentId, studentRows.map((student) => student.id)))
+    .orderBy(desc(attempts.createdAt), desc(attempts.attemptNo));
+
+  const attemptsByStudent = new Map<number, typeof attemptRows>();
+
+  for (const attempt of attemptRows) {
+    const existing = attemptsByStudent.get(attempt.studentId);
+
+    if (existing) {
+      existing.push(attempt);
+      continue;
+    }
+
+    attemptsByStudent.set(attempt.studentId, [attempt]);
+  }
+
+  return studentRows.map((student) => {
+    const studentAttempts = attemptsByStudent.get(student.id) ?? [];
+    let bestSubmittedAttempt: (typeof studentAttempts)[number] | null = null;
+    let submittedAttemptCount = 0;
+
+    for (const attempt of studentAttempts) {
+      if (attempt.status !== 'submitted') {
+        continue;
+      }
+
+      submittedAttemptCount += 1;
+
+      if (!bestSubmittedAttempt) {
+        bestSubmittedAttempt = attempt;
+        continue;
+      }
+
+      const shouldReplace =
+        attempt.scoreKpm > bestSubmittedAttempt.scoreKpm
+        || (attempt.scoreKpm === bestSubmittedAttempt.scoreKpm && attempt.accuracy > bestSubmittedAttempt.accuracy)
+        || (
+          attempt.scoreKpm === bestSubmittedAttempt.scoreKpm
+          && attempt.accuracy === bestSubmittedAttempt.accuracy
+          && (attempt.submittedAt?.getTime() ?? 0) < (bestSubmittedAttempt.submittedAt?.getTime() ?? 0)
+        );
+
+      if (shouldReplace) {
+        bestSubmittedAttempt = attempt;
+      }
+    }
+
+    return {
+      ...student,
+      bestSubmittedScoreKpm: bestSubmittedAttempt?.scoreKpm ?? null,
+      bestSubmittedAccuracy: bestSubmittedAttempt?.accuracy ?? null,
+      submittedAttemptCount,
+      totalAttemptCount: studentAttempts.length,
+      attempts: studentAttempts,
+    };
+  });
 }
 
 export async function ensureAttemptForStudent(studentId: number) {
@@ -285,40 +365,6 @@ export async function getLeaderboard(): Promise<LeaderboardEntry[]> {
       return (left.submittedAt?.getTime() ?? 0) - (right.submittedAt?.getTime() ?? 0);
     })
     .map((entry, index) => ({ ...entry, rank: index + 1 }));
-}
-
-export async function getAttemptsList(filters?: { query?: string }) {
-  const conditions = [];
-
-  if (filters?.query?.trim()) {
-    const keyword = filters.query.trim();
-    conditions.push(
-      or(
-        like(attempts.studentNoSnapshot, `%${keyword}%`),
-        like(attempts.studentNameSnapshot, `%${keyword}%`),
-        like(attempts.campusEmailSnapshot, `%${keyword}%`),
-        like(attempts.articleTitleSnapshot, `%${keyword}%`),
-      )!,
-    );
-  }
-
-  return db
-    .select({
-      id: attempts.id,
-      studentNo: attempts.studentNoSnapshot,
-      studentName: attempts.studentNameSnapshot,
-      campusEmail: attempts.campusEmailSnapshot,
-      articleTitle: attempts.articleTitleSnapshot,
-      status: attempts.status,
-      scoreKpm: attempts.scoreKpm,
-      accuracy: attempts.accuracy,
-      submittedAt: attempts.submittedAt,
-      attemptNo: attempts.attemptNo,
-      suspicionFlags: attempts.suspicionFlags,
-    })
-    .from(attempts)
-    .where(conditions.length ? and(...conditions) : undefined)
-    .orderBy(desc(attempts.createdAt));
 }
 
 export async function getExportRows() {
