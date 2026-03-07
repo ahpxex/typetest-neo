@@ -1,38 +1,12 @@
-import {
-  and,
-  asc,
-  count,
-  desc,
-  eq,
-  like,
-  or,
-  sql,
-} from 'drizzle-orm';
+import { and, asc, count, desc, eq, like, or, sql } from 'drizzle-orm';
 
 import { db } from '@/db/client';
-import {
-  adminUsers,
-  articles,
-  attempts,
-  campaignArticles,
-  campaignCurrentArticles,
-  campaigns,
-  classGroups,
-  students,
-} from '@/db/schema';
+import { adminUsers, articles, attempts, campaignCurrentArticles, campaigns, students } from '@/db/schema';
 
 type StudentIdentityInput = {
   studentNo: string;
   name: string;
   campusEmail: string;
-};
-
-export type DashboardOverview = {
-  totalStudents: number;
-  totalArticles: number;
-  totalAttempts: number;
-  activeCampaign: Awaited<ReturnType<typeof getActiveCampaign>>;
-  recentAttempts: Awaited<ReturnType<typeof getRecentAttempts>>;
 };
 
 export type LeaderboardEntry = {
@@ -41,8 +15,6 @@ export type LeaderboardEntry = {
   studentNo: string;
   name: string;
   campusEmail: string;
-  className: string | null;
-  classCode: string | null;
   attemptId: number;
   scoreKpm: number;
   accuracy: number;
@@ -66,10 +38,7 @@ function deterministicIndex(total: number, seed: string) {
 async function getRotatingArticlePool() {
   const publishedArticles = await db
     .select({
-      campaignId: sql<number>`0`,
       articleId: articles.id,
-      sortOrder: sql<number>`0`,
-      isActive: sql<boolean>`1`,
       title: articles.title,
       slug: articles.slug,
       language: articles.language,
@@ -84,6 +53,19 @@ async function getRotatingArticlePool() {
   const withoutDevSeed = publishedArticles.filter((article) => article.source !== 'seed:dev');
 
   return withoutDevSeed.length > 0 ? withoutDevSeed : publishedArticles;
+}
+
+async function getCampaignById(id: number) {
+  return db.query.campaigns.findFirst({
+    where: eq(campaigns.id, id),
+  });
+}
+
+async function getLatestCampaignCurrentArticle(campaignId: number) {
+  return db.query.campaignCurrentArticles.findFirst({
+    where: eq(campaignCurrentArticles.campaignId, campaignId),
+    orderBy: [desc(campaignCurrentArticles.createdAt)],
+  });
 }
 
 export async function getStudentByIdentity(input: StudentIdentityInput) {
@@ -103,27 +85,6 @@ export async function getAdminByUsername(username: string) {
   });
 }
 
-export async function getClassGroupsList() {
-  const rows = await db
-    .select({
-      id: classGroups.id,
-      code: classGroups.code,
-      name: classGroups.name,
-      gradeYear: classGroups.gradeYear,
-      department: classGroups.department,
-      major: classGroups.major,
-      studentCount: count(students.id),
-      createdAt: classGroups.createdAt,
-      updatedAt: classGroups.updatedAt,
-    })
-    .from(classGroups)
-    .leftJoin(students, eq(students.classGroupId, classGroups.id))
-    .groupBy(classGroups.id)
-    .orderBy(desc(classGroups.gradeYear), asc(classGroups.code));
-
-  return rows;
-}
-
 export async function getStudentsList(search?: string) {
   const keyword = search?.trim();
   const filter = keyword
@@ -131,8 +92,6 @@ export async function getStudentsList(search?: string) {
         like(students.studentNo, `%${keyword}%`),
         like(students.name, `%${keyword}%`),
         like(students.campusEmail, `%${keyword}%`),
-        like(classGroups.name, `%${keyword}%`),
-        like(classGroups.code, `%${keyword}%`),
       )
     : undefined;
 
@@ -146,68 +105,10 @@ export async function getStudentsList(search?: string) {
       notes: students.notes,
       createdAt: students.createdAt,
       updatedAt: students.updatedAt,
-      classGroupId: classGroups.id,
-      className: classGroups.name,
-      classCode: classGroups.code,
     })
     .from(students)
-    .leftJoin(classGroups, eq(classGroups.id, students.classGroupId))
     .where(filter)
     .orderBy(desc(students.createdAt), asc(students.studentNo));
-}
-
-export async function getArticlesList() {
-  return db.query.articles.findMany({
-    orderBy: [desc(articles.updatedAt), asc(articles.title)],
-  });
-}
-
-export async function getArticleById(id: number) {
-  return db.query.articles.findFirst({
-    where: eq(articles.id, id),
-  });
-}
-
-export async function getCampaignsList() {
-  return db.query.campaigns.findMany({
-    orderBy: [
-      desc(campaigns.status),
-      desc(campaigns.updatedAt),
-      desc(campaigns.createdAt),
-    ],
-  });
-}
-
-export async function getCampaignById(id: number) {
-  return db.query.campaigns.findFirst({
-    where: eq(campaigns.id, id),
-  });
-}
-
-export async function getCampaignArticleAssignments(campaignId: number) {
-  return db
-    .select({
-      campaignId: campaignArticles.campaignId,
-      articleId: campaignArticles.articleId,
-      sortOrder: campaignArticles.sortOrder,
-      isActive: campaignArticles.isActive,
-      title: articles.title,
-      slug: articles.slug,
-      language: articles.language,
-      status: articles.status,
-      contentRaw: articles.contentRaw,
-    })
-    .from(campaignArticles)
-    .innerJoin(articles, eq(articles.id, campaignArticles.articleId))
-    .where(eq(campaignArticles.campaignId, campaignId))
-    .orderBy(asc(campaignArticles.sortOrder), asc(articles.title));
-}
-
-export async function getLatestCampaignCurrentArticle(campaignId: number) {
-  return db.query.campaignCurrentArticles.findFirst({
-    where: eq(campaignCurrentArticles.campaignId, campaignId),
-    orderBy: [desc(campaignCurrentArticles.createdAt)],
-  });
 }
 
 export async function getActiveCampaign() {
@@ -217,18 +118,14 @@ export async function getActiveCampaign() {
   });
 }
 
-export async function resolveCurrentArticleForCampaign(campaignId: number) {
+async function resolveCurrentArticleForCampaign(campaignId: number) {
   const campaign = await getCampaignById(campaignId);
 
   if (!campaign) {
     return null;
   }
 
-  const linkedAssignments = (await getCampaignArticleAssignments(campaignId)).filter(
-    (assignment) => assignment.isActive,
-  );
-  const rotatingPool = await getRotatingArticlePool();
-  const pool = rotatingPool.length > 0 ? rotatingPool : linkedAssignments;
+  const pool = await getRotatingArticlePool();
 
   if (pool.length === 0) {
     return null;
@@ -268,7 +165,7 @@ export async function resolveCurrentArticleForCampaign(campaignId: number) {
 
   if (campaign.articleStrategy === 'shuffle_once') {
     if (latestCurrent) {
-      const matched = pool.find((assignment) => assignment.articleId === latestCurrent.articleId);
+      const matched = pool.find((article) => article.articleId === latestCurrent.articleId);
       if (matched) {
         return matched;
       }
@@ -295,7 +192,7 @@ export async function resolveCurrentArticleForCampaign(campaignId: number) {
   });
 
   if (todayCurrent) {
-    const matched = pool.find((assignment) => assignment.articleId === todayCurrent.articleId);
+    const matched = pool.find((article) => article.articleId === todayCurrent.articleId);
     if (matched) {
       return matched;
     }
@@ -311,43 +208,6 @@ export async function resolveCurrentArticleForCampaign(campaignId: number) {
   });
 
   return selected;
-}
-
-export async function getDashboardOverview(): Promise<DashboardOverview> {
-  const [studentCount, articleCount, attemptCount, activeCampaign, recentAttempts] = await Promise.all([
-    db.select({ count: count() }).from(students).get(),
-    db.select({ count: count() }).from(articles).get(),
-    db.select({ count: count() }).from(attempts).get(),
-    getActiveCampaign(),
-    getRecentAttempts(),
-  ]);
-
-  return {
-    totalStudents: studentCount?.count ?? 0,
-    totalArticles: articleCount?.count ?? 0,
-    totalAttempts: attemptCount?.count ?? 0,
-    activeCampaign,
-    recentAttempts,
-  };
-}
-
-export async function getRecentAttempts(limit = 8) {
-  return db
-    .select({
-      attemptId: attempts.id,
-      studentNo: attempts.studentNoSnapshot,
-      studentName: attempts.studentNameSnapshot,
-      articleTitle: attempts.articleTitleSnapshot,
-      scoreKpm: attempts.scoreKpm,
-      accuracy: attempts.accuracy,
-      status: attempts.status,
-      submittedAt: attempts.submittedAt,
-      campaignName: campaigns.name,
-    })
-    .from(attempts)
-    .leftJoin(campaigns, eq(campaigns.id, attempts.campaignId))
-    .orderBy(desc(attempts.createdAt))
-    .limit(limit);
 }
 
 export async function ensureAttemptForStudent(studentId: number) {
@@ -408,7 +268,7 @@ export async function ensureAttemptForStudent(studentId: number) {
   await db.insert(attempts).values({
     campaignId: activeCampaign.id,
     studentId: student.id,
-    classGroupId: student.classGroupId,
+    classGroupId: null,
     articleId: currentArticle.articleId,
     attemptNo,
     status: 'started',
@@ -439,12 +299,6 @@ export async function ensureAttemptForStudent(studentId: number) {
   };
 }
 
-export async function getAttemptById(attemptId: number) {
-  return db.query.attempts.findFirst({
-    where: eq(attempts.id, attemptId),
-  });
-}
-
 export async function getAttemptDetail(attemptId: number) {
   return db
     .select({
@@ -454,9 +308,6 @@ export async function getAttemptDetail(attemptId: number) {
       articleId: attempts.articleId,
       articleTitle: attempts.articleTitleSnapshot,
       studentId: attempts.studentId,
-      classGroupId: attempts.classGroupId,
-      className: classGroups.name,
-      classCode: classGroups.code,
       studentNo: attempts.studentNoSnapshot,
       studentName: attempts.studentNameSnapshot,
       campusEmail: attempts.campusEmailSnapshot,
@@ -479,7 +330,6 @@ export async function getAttemptDetail(attemptId: number) {
     })
     .from(attempts)
     .leftJoin(campaigns, eq(campaigns.id, attempts.campaignId))
-    .leftJoin(classGroups, eq(classGroups.id, attempts.classGroupId))
     .leftJoin(articles, eq(articles.id, attempts.articleId))
     .where(eq(attempts.id, attemptId))
     .get();
@@ -493,8 +343,6 @@ export async function getLeaderboard(campaignId: number): Promise<LeaderboardEnt
       studentNo: attempts.studentNoSnapshot,
       studentName: attempts.studentNameSnapshot,
       campusEmail: attempts.campusEmailSnapshot,
-      className: classGroups.name,
-      classCode: classGroups.code,
       scoreKpm: attempts.scoreKpm,
       accuracy: attempts.accuracy,
       submittedAt: attempts.submittedAt,
@@ -502,7 +350,6 @@ export async function getLeaderboard(campaignId: number): Promise<LeaderboardEnt
       status: attempts.status,
     })
     .from(attempts)
-    .leftJoin(classGroups, eq(classGroups.id, attempts.classGroupId))
     .where(and(eq(attempts.campaignId, campaignId), eq(attempts.status, 'submitted')))
     .orderBy(desc(attempts.scoreKpm), desc(attempts.accuracy), asc(attempts.submittedAt));
 
@@ -516,8 +363,6 @@ export async function getLeaderboard(campaignId: number): Promise<LeaderboardEnt
       studentNo: row.studentNo,
       name: row.studentName,
       campusEmail: row.campusEmail,
-      className: row.className,
-      classCode: row.classCode,
       attemptId: row.attemptId,
       scoreKpm: row.scoreKpm,
       accuracy: row.accuracy,
@@ -555,20 +400,8 @@ export async function getLeaderboard(campaignId: number): Promise<LeaderboardEnt
     .map((entry, index) => ({ ...entry, rank: index + 1 }));
 }
 
-export async function getAttemptsList(filters?: {
-  campaignId?: number;
-  status?: string;
-  query?: string;
-}) {
+export async function getAttemptsList(filters?: { query?: string }) {
   const conditions = [];
-
-  if (filters?.campaignId) {
-    conditions.push(eq(attempts.campaignId, filters.campaignId));
-  }
-
-  if (filters?.status) {
-    conditions.push(eq(attempts.status, filters.status as typeof attempts.$inferSelect.status));
-  }
 
   if (filters?.query?.trim()) {
     const keyword = filters.query.trim();
@@ -577,7 +410,6 @@ export async function getAttemptsList(filters?: {
         like(attempts.studentNoSnapshot, `%${keyword}%`),
         like(attempts.studentNameSnapshot, `%${keyword}%`),
         like(attempts.campusEmailSnapshot, `%${keyword}%`),
-        like(campaigns.name, `%${keyword}%`),
         like(attempts.articleTitleSnapshot, `%${keyword}%`),
       )!,
     );
@@ -586,8 +418,6 @@ export async function getAttemptsList(filters?: {
   return db
     .select({
       id: attempts.id,
-      campaignId: attempts.campaignId,
-      campaignName: campaigns.name,
       studentNo: attempts.studentNoSnapshot,
       studentName: attempts.studentNameSnapshot,
       campusEmail: attempts.campusEmailSnapshot,
@@ -600,22 +430,16 @@ export async function getAttemptsList(filters?: {
       suspicionFlags: attempts.suspicionFlags,
     })
     .from(attempts)
-    .leftJoin(campaigns, eq(campaigns.id, attempts.campaignId))
     .where(conditions.length ? and(...conditions) : undefined)
     .orderBy(desc(attempts.createdAt));
 }
 
-export async function getExportRows(campaignId?: number) {
-  const conditions = campaignId ? [eq(attempts.campaignId, campaignId)] : [];
-
+export async function getExportRows() {
   return db
     .select({
-      campaignName: campaigns.name,
       studentNo: attempts.studentNoSnapshot,
       studentName: attempts.studentNameSnapshot,
       campusEmail: attempts.campusEmailSnapshot,
-      className: classGroups.name,
-      classCode: classGroups.code,
       articleTitle: attempts.articleTitleSnapshot,
       scoreKpm: attempts.scoreKpm,
       accuracy: attempts.accuracy,
@@ -629,8 +453,5 @@ export async function getExportRows(campaignId?: number) {
       ipAddress: attempts.ipAddress,
     })
     .from(attempts)
-    .leftJoin(campaigns, eq(campaigns.id, attempts.campaignId))
-    .leftJoin(classGroups, eq(classGroups.id, attempts.classGroupId))
-    .where(conditions.length ? and(...conditions) : undefined)
     .orderBy(desc(attempts.createdAt));
 }

@@ -12,24 +12,19 @@ function escapeCsv(value: unknown) {
   return stringValue;
 }
 
-export async function GET(request: Request) {
+export async function GET() {
   const currentAdmin = await getCurrentAdmin();
 
   if (!currentAdmin) {
     return NextResponse.json({ error: '管理员未登录。' }, { status: 401 });
   }
 
-  const { searchParams } = new URL(request.url);
-  const campaignId = Number(searchParams.get('campaignId') ?? 0) || undefined;
-  const rows = await getExportRows(campaignId);
+  const rows = await getExportRows();
 
   const headers = [
-    'campaign_name',
     'student_no',
     'student_name',
     'campus_email',
-    'class_name',
-    'class_code',
     'article_title',
     'score_kpm',
     'accuracy',
@@ -47,12 +42,9 @@ export async function GET(request: Request) {
     headers.join(','),
     ...rows.map((row) =>
       [
-        row.campaignName,
         row.studentNo,
         row.studentName,
         row.campusEmail,
-        row.className,
-        row.classCode,
         row.articleTitle,
         row.scoreKpm,
         row.accuracy,
@@ -74,7 +66,7 @@ export async function GET(request: Request) {
     status: 200,
     headers: {
       'Content-Type': 'text/csv; charset=utf-8',
-      'Content-Disposition': `attachment; filename="attempts-${campaignId ?? 'all'}.csv"`,
+      'Content-Disposition': 'attachment; filename="attempts-all.csv"',
     },
   });
 }

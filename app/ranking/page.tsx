@@ -32,7 +32,7 @@ export default async function RankingPage() {
       <div className="mx-auto max-w-6xl space-y-6">
         <header className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <p className="text-sm text-muted-foreground">当前场次：{activeCampaign.name}</p>
+            <p className="text-sm text-muted-foreground">当前测试：{activeCampaign.name}</p>
             <h1 className="text-3xl font-semibold tracking-tight">排行榜</h1>
           </div>
           <div className="flex gap-3">
@@ -42,17 +42,16 @@ export default async function RankingPage() {
         </header>
 
         <Card>
-          <CardHeader><CardTitle>最佳成绩榜</CardTitle><CardDescription>每位学生按当前场次最佳成绩上榜。</CardDescription></CardHeader>
+          <CardHeader><CardTitle>最佳成绩榜</CardTitle><CardDescription>每位学生按当前测试最佳成绩上榜。</CardDescription></CardHeader>
           <CardContent>
             <Table>
               <TableHeader>
                 <TableRow>
                   <TableHead>排名</TableHead>
                   <TableHead>学生</TableHead>
-                  <TableHead>班级</TableHead>
                   <TableHead>速度</TableHead>
                   <TableHead>正确率</TableHead>
-                  <TableHead>Attempt</TableHead>
+                  <TableHead>成绩</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -60,7 +59,6 @@ export default async function RankingPage() {
                   <TableRow key={entry.studentId} className={entry.studentId === student.id ? 'bg-muted/30' : ''}>
                     <TableCell className="font-semibold">#{entry.rank}</TableCell>
                     <TableCell><p className="font-medium">{entry.name}</p><p className="text-xs text-muted-foreground">{entry.studentNo}</p></TableCell>
-                    <TableCell>{entry.classCode ? `${entry.classCode} · ${entry.className}` : '未分班'}</TableCell>
                     <TableCell>{formatKpm(entry.scoreKpm)}</TableCell>
                     <TableCell>{formatPercent(entry.accuracy)}</TableCell>
                     <TableCell><Button asChild variant="outline" size="sm"><Link href={`/result/${entry.attemptId}`}>查看成绩</Link></Button></TableCell>
