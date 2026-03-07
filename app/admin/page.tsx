@@ -14,6 +14,15 @@ import {
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import {
+  Pagination,
+  PaginationContent,
+  PaginationEllipsis,
+  PaginationItem,
+  PaginationLink,
+  PaginationNext,
+  PaginationPrevious,
+} from '@/components/ui/pagination'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Textarea } from '@/components/ui/textarea'
 import { StudentScoresDialog } from '@/components/admin/student-scores-dialog'
@@ -35,6 +44,22 @@ function buildAdminHref(query: string, page: number) {
 
   const search = params.toString()
   return search ? `/admin?${search}` : '/admin'
+}
+
+function getPaginationItems(totalPages: number, currentPage: number) {
+  if (totalPages <= 7) {
+    return Array.from({ length: totalPages }, (_, index) => index + 1)
+  }
+
+  if (currentPage <= 4) {
+    return [1, 2, 3, 4, 5, 'ellipsis', totalPages] as const
+  }
+
+  if (currentPage >= totalPages - 3) {
+    return [1, 'ellipsis', totalPages - 4, totalPages - 3, totalPages - 2, totalPages - 1, totalPages] as const
+  }
+
+  return [1, 'ellipsis', currentPage - 1, currentPage, currentPage + 1, 'ellipsis', totalPages] as const
 }
 
 export default async function AdminPage({ searchParams }: { searchParams?: AppSearchParams }) {
@@ -142,16 +167,37 @@ export default async function AdminPage({ searchParams }: { searchParams?: AppSe
             </Table>
           </div>
 
-          <div className="mt-3 flex shrink-0 items-center justify-between gap-3 text-sm text-muted-foreground">
+          <div className="mt-3 flex shrink-0 flex-col gap-3 text-sm text-muted-foreground md:flex-row md:items-center md:justify-between">
             <p>第 {studentPage.page} / {studentPage.totalPages} 页</p>
-            <div className="flex items-center gap-2">
-              <Button asChild variant="outline" size="sm" disabled={studentPage.page <= 1}>
-                <Link href={buildAdminHref(query, Math.max(1, studentPage.page - 1))}>上一页</Link>
-              </Button>
-              <Button asChild variant="outline" size="sm" disabled={studentPage.page >= studentPage.totalPages}>
-                <Link href={buildAdminHref(query, Math.min(studentPage.totalPages, studentPage.page + 1))}>下一页</Link>
-              </Button>
-            </div>
+            <Pagination className="mx-0 w-auto justify-end">
+              <PaginationContent>
+                <PaginationItem>
+                  {studentPage.page > 1 ? (
+                    <PaginationPrevious href={buildAdminHref(query, studentPage.page - 1)} />
+                  ) : (
+                    <span className="inline-flex h-8 items-center justify-center gap-1 rounded-md px-2.5 text-muted-foreground/50">上一页</span>
+                  )}
+                </PaginationItem>
+                {getPaginationItems(studentPage.totalPages, studentPage.page).map((item, index) => (
+                  <PaginationItem key={`${item}-${index}`}>
+                    {item === 'ellipsis' ? (
+                      <PaginationEllipsis />
+                    ) : (
+                      <PaginationLink href={buildAdminHref(query, item)} isActive={item === studentPage.page}>
+                        {item}
+                      </PaginationLink>
+                    )}
+                  </PaginationItem>
+                ))}
+                <PaginationItem>
+                  {studentPage.page < studentPage.totalPages ? (
+                    <PaginationNext href={buildAdminHref(query, studentPage.page + 1)} />
+                  ) : (
+                    <span className="inline-flex h-8 items-center justify-center gap-1 rounded-md px-2.5 text-muted-foreground/50">下一页</span>
+                  )}
+                </PaginationItem>
+              </PaginationContent>
+            </Pagination>
           </div>
         </CardContent>
       </Card>
