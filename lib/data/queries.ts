@@ -261,7 +261,13 @@ export async function getAdminStudentsPage({
   };
 }
 
-export async function getAdminStudentAttemptSummaries(studentId: number): Promise<AdminStudentAttemptSummary[]> {
+export async function getAdminStudentAttemptSummaries(studentNo: string): Promise<AdminStudentAttemptSummary[]> {
+  const normalizedStudentNo = studentNo.trim();
+
+  if (!normalizedStudentNo) {
+    return [];
+  }
+
   return db
     .select({
       id: attempts.id,
@@ -277,7 +283,7 @@ export async function getAdminStudentAttemptSummaries(studentId: number): Promis
       suspicionFlags: attempts.suspicionFlags,
     })
     .from(attempts)
-    .where(eq(attempts.studentId, studentId))
+    .where(eq(attempts.studentNoSnapshot, normalizedStudentNo))
     .orderBy(desc(attempts.attemptNo), desc(attempts.createdAt));
 }
 

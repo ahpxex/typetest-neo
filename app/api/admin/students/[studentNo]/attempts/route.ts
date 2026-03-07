@@ -5,7 +5,7 @@ import { getAdminStudentAttemptSummaries } from '@/lib/data/queries'
 
 export async function GET(
   _request: Request,
-  { params }: { params: Promise<{ studentId: string }> },
+  { params }: { params: Promise<{ studentNo: string }> },
 ) {
   const currentAdmin = await getCurrentAdmin()
 
@@ -13,14 +13,14 @@ export async function GET(
     return NextResponse.json({ error: '管理员未登录。' }, { status: 401 })
   }
 
-  const { studentId } = await params
-  const id = Number(studentId)
+  const { studentNo } = await params
+  const normalizedStudentNo = decodeURIComponent(studentNo).trim()
 
-  if (!Number.isInteger(id) || id <= 0) {
-    return NextResponse.json({ error: '学生 ID 不合法。' }, { status: 400 })
+  if (!normalizedStudentNo) {
+    return NextResponse.json({ error: '学号不合法。' }, { status: 400 })
   }
 
-  const attempts = await getAdminStudentAttemptSummaries(id)
+  const attempts = await getAdminStudentAttemptSummaries(normalizedStudentNo)
 
   return NextResponse.json({
     attempts: attempts.map((attempt) => ({

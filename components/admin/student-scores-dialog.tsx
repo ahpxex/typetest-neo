@@ -32,6 +32,8 @@ type AttemptResponse = {
   }>;
 }
 
+const REQUEST_TIMEOUT_MS = 10000
+
 export function StudentScoresDialog({ student }: { student: AdminStudentSummary }) {
   const [open, setOpen] = useState(false)
   const [attempts, setAttempts] = useState<AttemptResponse['attempts'] | null>(null)
@@ -43,16 +45,20 @@ export function StudentScoresDialog({ student }: { student: AdminStudentSummary 
       return
     }
 
-    let cancelled = false
+    const controller = new AbortController()
+    const timer = window.setTimeout(() => {
+      controller.abort('timeout')
+    }, REQUEST_TIMEOUT_MS)
 
     const loadAttempts = async () => {
       setLoading(true)
       setError(null)
 
       try {
-        const response = await fetch(`/api/admin/students/${student.id}/attempts`, {
+        const response = await fetch(`/api/admin/students/${encodeURIComponent(student.studentNo)}/attempts`, {
           method: 'GET',
           cache: 'no-store',
+          signal: controller.signal,
         })
         const payload = await response.json() as AttemptResponse & { error?: string }
 
@@ -60,26 +66,26 @@ export function StudentScoresDialog({ student }: { student: AdminStudentSummary 
           throw new Error(payload.error ?? '成绩加载失败')
         }
 
-        if (!cancelled) {
-          setAttempts(payload.attempts)
-        }
+        setAttempts(payload.attempts)
       } catch (loadError) {
-        if (!cancelled) {
+        if (loadError instanceof DOMException && loadError.name === 'AbortError') {
+          setError('成绩详情加载超时，请重试')
+        } else {
           setError(loadError instanceof Error ? loadError.message : '成绩加载失败')
         }
       } finally {
-        if (!cancelled) {
-          setLoading(false)
-        }
+        window.clearTimeout(timer)
+        setLoading(false)
       }
     }
 
     void loadAttempts()
 
     return () => {
-      cancelled = true
+      window.clearTimeout(timer)
+      controller.abort()
     }
-  }, [attempts, loading, open, student.id])
+  }, [attempts, loading, open, student.studentNo])
 
   const bestSpeed = useMemo(
     () => (student.bestSubmittedScoreKpm === null ? '—' : formatKpm(student.bestSubmittedScoreKpm)),
