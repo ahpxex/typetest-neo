@@ -30,6 +30,10 @@ function hashToken(token: string) {
   return createHash('sha256').update(token).digest('hex');
 }
 
+async function revokeSessionRecord(tokenHash: string) {
+  await db.delete(sessions).where(eq(sessions.tokenHash, tokenHash));
+}
+
 export async function createSession(userType: SessionUserType, userId: number) {
   const token = randomBytes(24).toString('hex');
   const tokenHash = hashToken(token);
@@ -58,7 +62,7 @@ export async function clearSession(userType: SessionUserType) {
   const token = cookieStore.get(getCookieName(userType))?.value;
 
   if (token) {
-    await db.delete(sessions).where(eq(sessions.tokenHash, hashToken(token)));
+    await revokeSessionRecord(hashToken(token));
   }
 
   cookieStore.delete(getCookieName(userType));
@@ -83,7 +87,6 @@ async function readSessionByType(userType: SessionUserType): Promise<AppSession 
   });
 
   if (!sessionRecord) {
-    cookieStore.delete(getCookieName(userType));
     return null;
   }
 
@@ -116,7 +119,7 @@ export async function getCurrentStudent() {
   });
 
   if (!student) {
-    await clearSession('student');
+    await revokeSessionRecord(session.tokenHash);
     return null;
   }
 
@@ -135,7 +138,7 @@ export async function getCurrentAdmin() {
   });
 
   if (!admin) {
-    await clearSession('admin');
+    await revokeSessionRecord(session.tokenHash);
     return null;
   }
 
