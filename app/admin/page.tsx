@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { AdminStudentFilters } from '@/components/admin/admin-student-filters';
 import { Card, CardContent } from '@/components/ui/card';
 import {
   Pagination,
@@ -131,46 +132,15 @@ export default async function AdminPage({ searchParams }: { searchParams?: AppSe
 
       <Card className="flex min-h-0 flex-1 flex-col overflow-hidden">
         <CardContent className="flex min-h-0 flex-1 flex-col overflow-hidden">
-          <form className="mb-3 grid shrink-0 gap-3 md:grid-cols-[minmax(220px,1.5fr)_160px_160px_180px_auto_auto]">
-            <input
-              name="query"
-              defaultValue={query}
-              placeholder="按学号、姓名或邮箱搜索"
-              className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none ring-offset-background placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-            />
-            <select
-              name="year"
-              defaultValue={enrollmentYear}
-              className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-            >
-              <option value="">全部年份</option>
-              {filterOptions.enrollmentYears.map((option) => (
-                <option key={option} value={option}>{option}</option>
-              ))}
-            </select>
-            <select
-              name="school"
-              defaultValue={schoolCode}
-              className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-            >
-              <option value="">全部学院</option>
-              {filterOptions.schoolCodes.map((option) => (
-                <option key={option} value={option}>学院 {option}</option>
-              ))}
-            </select>
-            <select
-              name="major"
-              defaultValue={majorCode}
-              className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-            >
-              <option value="">全部专业</option>
-              {filterOptions.majorCodes.map((option) => (
-                <option key={option} value={option}>专业 {option}</option>
-              ))}
-            </select>
-            <Button type="submit" variant="outline">筛选</Button>
-            <Button asChild variant="ghost"><Link href="/admin">重置</Link></Button>
-          </form>
+          <AdminStudentFilters
+            query={query}
+            enrollmentYear={enrollmentYear}
+            schoolCode={schoolCode}
+            majorCode={majorCode}
+            enrollmentYears={filterOptions.enrollmentYears}
+            schoolCodes={filterOptions.schoolCodes}
+            majorCodes={filterOptions.majorCodes}
+          />
 
           <div className="min-h-0 flex-1 overflow-auto rounded-lg border border-border">
             <Table>
