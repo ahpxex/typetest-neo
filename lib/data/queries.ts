@@ -268,7 +268,6 @@ export async function ensureAttemptForStudent(studentId: number) {
   await db.insert(attempts).values({
     campaignId: activeCampaign.id,
     studentId: student.id,
-    classGroupId: null,
     articleId: currentArticle.articleId,
     attemptNo,
     status: 'started',

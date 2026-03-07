@@ -53,7 +53,6 @@ export async function createStudentAction(formData: FormData) {
       studentNo: data.studentNo,
       name: data.name,
       campusEmail: data.campusEmail.toLowerCase(),
-      classGroupId: null,
       notes: data.notes ?? null,
       status: 'active',
     })
@@ -62,7 +61,6 @@ export async function createStudentAction(formData: FormData) {
       set: {
         name: data.name,
         campusEmail: data.campusEmail.toLowerCase(),
-        classGroupId: null,
         notes: data.notes ?? null,
         updatedAt: new Date(),
       },
@@ -113,7 +111,6 @@ export async function importStudentsCsvAction(formData: FormData) {
         studentNo: data.studentNo,
         name: data.name,
         campusEmail: data.campusEmail.toLowerCase(),
-        classGroupId: null,
         notes: null,
         status: 'active',
       })
@@ -122,8 +119,7 @@ export async function importStudentsCsvAction(formData: FormData) {
         set: {
           name: data.name,
           campusEmail: data.campusEmail.toLowerCase(),
-          classGroupId: null,
-          notes: null,
+            notes: null,
           updatedAt: new Date(),
         },
       });

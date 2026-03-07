@@ -1,29 +1,13 @@
 import { eq } from 'drizzle-orm';
 
 import { db } from '@/db/client';
-import {
-  adminUsers,
-  articles,
-  campaignArticles,
-  campaignCurrentArticles,
-  campaigns,
-  classGroups,
-  students,
-} from '@/db/schema';
+import { adminUsers, articles, campaignCurrentArticles, campaigns, students } from '@/db/schema';
 import { hashPassword } from '@/lib/auth/password';
 
 const DEV_ADMIN = {
   username: 'admin',
   password: 'admin123456',
   displayName: '开发环境管理员',
-} as const;
-
-const DEV_CLASS = {
-  code: 'DEV-2026-01',
-  name: '开发测试班',
-  gradeYear: 2026,
-  department: '开发环境',
-  major: '打字测试系统',
 } as const;
 
 const DEV_STUDENT = {
@@ -58,39 +42,14 @@ function slugSource() {
   return 'seed:dev';
 }
 
-async function seedClassGroup() {
-  await db.insert(classGroups)
-    .values(DEV_CLASS)
-    .onConflictDoUpdate({
-      target: classGroups.code,
-      set: {
-        name: DEV_CLASS.name,
-        gradeYear: DEV_CLASS.gradeYear,
-        department: DEV_CLASS.department,
-        major: DEV_CLASS.major,
-        updatedAt: new Date(),
-      },
-    });
-
-  return db
-    .select()
-    .from(classGroups)
-    .where(eq(classGroups.code, DEV_CLASS.code))
-    .get();
-}
-
-async function seedStudent(classGroupId: number) {
+async function seedStudent() {
   await db.insert(students)
-    .values({
-      ...DEV_STUDENT,
-      classGroupId,
-    })
+    .values(DEV_STUDENT)
     .onConflictDoUpdate({
       target: students.studentNo,
       set: {
         name: DEV_STUDENT.name,
         campusEmail: DEV_STUDENT.campusEmail,
-        classGroupId,
         status: 'active',
         updatedAt: new Date(),
       },
@@ -186,23 +145,7 @@ async function seedCampaign() {
     .get();
 }
 
-async function linkCampaignArticle(campaignId: number, articleId: number, adminUserId: number) {
-  await db.insert(campaignArticles)
-    .values({
-      campaignId,
-      articleId,
-      sortOrder: 1,
-      isActive: true,
-    })
-    .onConflictDoUpdate({
-      target: [campaignArticles.campaignId, campaignArticles.articleId],
-      set: {
-        sortOrder: 1,
-        isActive: true,
-        updatedAt: new Date(),
-      },
-    });
-
+async function seedCurrentArticle(campaignId: number, articleId: number, adminUserId: number) {
   const exists = await db
     .select()
     .from(campaignCurrentArticles)
@@ -221,14 +164,8 @@ async function linkCampaignArticle(campaignId: number, articleId: number, adminU
 }
 
 async function main() {
-  const classGroup = await seedClassGroup();
-
-  if (!classGroup) {
-    throw new Error('Failed to seed development class group.');
-  }
-
   const admin = await seedAdmin();
-  const student = await seedStudent(classGroup.id);
+  const student = await seedStudent();
   const article = await seedArticle();
   const campaign = await seedCampaign();
 
@@ -236,7 +173,7 @@ async function main() {
     throw new Error('Failed to seed development identities or campaign.');
   }
 
-  await linkCampaignArticle(campaign.id, article.id, admin.id);
+  await seedCurrentArticle(campaign.id, article.id, admin.id);
 
   console.log('Development seed complete.');
   console.log('');
