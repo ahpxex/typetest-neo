@@ -21,7 +21,7 @@ export default async function ResultPage({ params }: { params: Promise<{ attempt
     redirect('/typing')
   }
 
-  const leaderboard = await getLeaderboard(attempt.campaignId)
+  const leaderboard = await getLeaderboard()
   const overallRank = leaderboard.find((entry) => entry.attemptId === attempt.attemptId)?.rank
 
   return (

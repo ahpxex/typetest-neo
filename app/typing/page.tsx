@@ -12,32 +12,16 @@ export default async function TypingPage() {
   const { student } = await requireStudent();
   const typingContext = await ensureAttemptForStudent(student.id);
 
-  if (typingContext.state === 'no-campaign') {
-    return (
-      <PageWrap studentName={student.name}>
-        <Card>
-          <CardHeader>
-            <CardTitle>当前暂无测试</CardTitle>
-            <CardDescription>请等待管理员发布新的测试后再进入。</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <p className="text-sm text-muted-foreground">系统还没有激活测试，请稍后再试。</p>
-          </CardContent>
-        </Card>
-      </PageWrap>
-    );
-  }
-
   if (typingContext.state === 'no-article') {
     return (
       <PageWrap studentName={student.name}>
         <Card>
           <CardHeader>
-            <CardTitle>当前测试没有可用文章</CardTitle>
+            <CardTitle>当前没有可用文章</CardTitle>
             <CardDescription>系统暂时没有分配可用文章。</CardDescription>
           </CardHeader>
           <CardContent>
-            <p className="text-sm text-muted-foreground">请联系管理员检查当前测试配置。</p>
+            <p className="text-sm text-muted-foreground">请联系管理员检查文章库。</p>
           </CardContent>
         </Card>
       </PageWrap>
@@ -50,11 +34,10 @@ export default async function TypingPage() {
         <Card>
           <CardHeader>
             <CardTitle>你已经完成当前测试</CardTitle>
-            <CardDescription>当前账号在这次测试下已达到尝试次数上限。</CardDescription>
+            <CardDescription>当前账号已达到尝试次数上限。</CardDescription>
           </CardHeader>
           <CardContent>
             <div className="space-y-3 text-sm text-muted-foreground">
-              <p>测试：{typingContext.campaign.name}</p>
               <p>文章：{typingContext.article.title}</p>
               {typingContext.latestAttempt ? (
                 <Button asChild>
@@ -91,7 +74,7 @@ export default async function TypingPage() {
         <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground md:justify-end">
           <span>{student.studentNo}</span>
           <span>·</span>
-          <span>{formatDurationSeconds(typingContext.campaign.durationSeconds)}</span>
+          <span>{formatDurationSeconds(typingContext.attempt.durationSecondsAllocated)}</span>
           <span>·</span>
           <span>{formatDateTime(typingContext.attempt.startedAt)}</span>
         </div>
@@ -111,7 +94,7 @@ export default async function TypingPage() {
         attemptId={typingContext.attempt.id}
         articleTitle={typingContext.article.title}
         referenceText={typingContext.article.contentRaw}
-        durationSeconds={typingContext.campaign.durationSeconds}
+        durationSeconds={typingContext.attempt.durationSecondsAllocated}
         startedAt={typingContext.attempt.startedAt.toISOString()}
       />
     </PageWrap>

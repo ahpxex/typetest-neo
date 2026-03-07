@@ -6,13 +6,8 @@ const articleStatusValues = ['draft', 'published', 'archived'] as const;
 const adminRoleValues = ['admin', 'teacher'] as const;
 const adminStatusValues = ['active', 'inactive'] as const;
 const studentStatusValues = ['active', 'inactive'] as const;
-const campaignModeValues = ['practice', 'exam'] as const;
-const campaignStatusValues = ['draft', 'scheduled', 'active', 'closed', 'archived'] as const;
-const articleStrategyValues = ['fixed', 'daily_random', 'shuffle_once'] as const;
-const rankingVisibilityValues = ['public', 'class_only', 'hidden'] as const;
 const attemptStatusValues = ['started', 'submitted', 'expired', 'cancelled', 'invalidated'] as const;
 const sessionUserTypeValues = ['student', 'admin'] as const;
-const currentArticleReasonValues = ['manual', 'daily_random', 'shuffle_once'] as const;
 
 const timestamps = () => ({
   createdAt: integer('created_at', { mode: 'timestamp_ms' })
@@ -87,65 +82,10 @@ export const articles = sqliteTable(
   ],
 );
 
-export const campaigns = sqliteTable(
-  'campaigns',
-  {
-    id: integer('id').primaryKey({ autoIncrement: true }),
-    name: text('name').notNull(),
-    academicYear: text('academic_year').notNull(),
-    term: text('term').notNull(),
-    mode: text('mode', { enum: campaignModeValues }).notNull().default('exam'),
-    status: text('status', { enum: campaignStatusValues }).notNull().default('draft'),
-    durationSeconds: integer('duration_seconds').notNull().default(180),
-    articleStrategy: text('article_strategy', { enum: articleStrategyValues }).notNull().default('fixed'),
-    allowRetry: integer('allow_retry', { mode: 'boolean' }).notNull().default(false),
-    maxAttemptsPerStudent: integer('max_attempts_per_student').notNull().default(1),
-    rankingVisibility: text('ranking_visibility', { enum: rankingVisibilityValues }).notNull().default('public'),
-    startAt: integer('start_at', { mode: 'timestamp_ms' }),
-    endAt: integer('end_at', { mode: 'timestamp_ms' }),
-    ...timestamps(),
-  },
-  (table) => [
-    index('campaigns_status_idx').on(table.status),
-    index('campaigns_academic_year_term_idx').on(table.academicYear, table.term),
-    check('campaigns_duration_seconds_positive_check', sql`${table.durationSeconds} > 0`),
-    check('campaigns_max_attempts_positive_check', sql`${table.maxAttemptsPerStudent} > 0`),
-  ],
-);
-
-export const campaignCurrentArticles = sqliteTable(
-  'campaign_current_articles',
-  {
-    id: integer('id').primaryKey({ autoIncrement: true }),
-    campaignId: integer('campaign_id')
-      .notNull()
-      .references(() => campaigns.id, { onDelete: 'cascade', onUpdate: 'cascade' }),
-    articleId: integer('article_id')
-      .notNull()
-      .references(() => articles.id, { onDelete: 'cascade', onUpdate: 'cascade' }),
-    resolvedDate: text('resolved_date'),
-    resolvedByAdminUserId: integer('resolved_by_admin_user_id').references(() => adminUsers.id, {
-      onDelete: 'set null',
-      onUpdate: 'cascade',
-    }),
-    reason: text('reason', { enum: currentArticleReasonValues }).notNull(),
-    createdAt: integer('created_at', { mode: 'timestamp_ms' })
-      .notNull()
-      .$defaultFn(() => new Date()),
-  },
-  (table) => [
-    index('campaign_current_articles_campaign_idx').on(table.campaignId),
-    index('campaign_current_articles_resolved_date_idx').on(table.resolvedDate),
-  ],
-);
-
 export const attempts = sqliteTable(
   'attempts',
   {
     id: integer('id').primaryKey({ autoIncrement: true }),
-    campaignId: integer('campaign_id')
-      .notNull()
-      .references(() => campaigns.id, { onDelete: 'restrict', onUpdate: 'cascade' }),
     studentId: integer('student_id')
       .notNull()
       .references(() => students.id, { onDelete: 'restrict', onUpdate: 'cascade' }),
@@ -187,10 +127,10 @@ export const attempts = sqliteTable(
     ...timestamps(),
   },
   (table) => [
-    uniqueIndex('attempts_campaign_student_attempt_no_unique').on(table.campaignId, table.studentId, table.attemptNo),
-    index('attempts_campaign_idx').on(table.campaignId),
-    index('attempts_campaign_status_idx').on(table.campaignId, table.status),
+    uniqueIndex('attempts_student_attempt_no_unique').on(table.studentId, table.attemptNo),
     index('attempts_student_idx').on(table.studentId),
+    index('attempts_article_idx').on(table.articleId),
+    index('attempts_status_idx').on(table.status),
     index('attempts_submitted_at_idx').on(table.submittedAt),
     check('attempts_duration_seconds_allocated_positive_check', sql`${table.durationSecondsAllocated} > 0`),
     check('attempts_attempt_no_positive_check', sql`${table.attemptNo} > 0`),
@@ -230,40 +170,11 @@ export const studentsRelations = relations(students, ({ many }) => ({
   attempts: many(attempts),
 }));
 
-export const adminUsersRelations = relations(adminUsers, ({ many }) => ({
-  resolvedCurrentArticles: many(campaignCurrentArticles),
-}));
-
 export const articlesRelations = relations(articles, ({ many }) => ({
-  currentAssignments: many(campaignCurrentArticles),
   attempts: many(attempts),
-}));
-
-export const campaignsRelations = relations(campaigns, ({ many }) => ({
-  currentArticleHistory: many(campaignCurrentArticles),
-  attempts: many(attempts),
-}));
-
-export const campaignCurrentArticlesRelations = relations(campaignCurrentArticles, ({ one }) => ({
-  campaign: one(campaigns, {
-    fields: [campaignCurrentArticles.campaignId],
-    references: [campaigns.id],
-  }),
-  article: one(articles, {
-    fields: [campaignCurrentArticles.articleId],
-    references: [articles.id],
-  }),
-  resolvedByAdminUser: one(adminUsers, {
-    fields: [campaignCurrentArticles.resolvedByAdminUserId],
-    references: [adminUsers.id],
-  }),
 }));
 
 export const attemptsRelations = relations(attempts, ({ one }) => ({
-  campaign: one(campaigns, {
-    fields: [attempts.campaignId],
-    references: [campaigns.id],
-  }),
   student: one(students, {
     fields: [attempts.studentId],
     references: [students.id],
@@ -280,10 +191,6 @@ export type AdminUser = typeof adminUsers.$inferSelect;
 export type NewAdminUser = typeof adminUsers.$inferInsert;
 export type Article = typeof articles.$inferSelect;
 export type NewArticle = typeof articles.$inferInsert;
-export type Campaign = typeof campaigns.$inferSelect;
-export type NewCampaign = typeof campaigns.$inferInsert;
-export type CampaignCurrentArticle = typeof campaignCurrentArticles.$inferSelect;
-export type NewCampaignCurrentArticle = typeof campaignCurrentArticles.$inferInsert;
 export type Attempt = typeof attempts.$inferSelect;
 export type NewAttempt = typeof attempts.$inferInsert;
 export type Session = typeof sessions.$inferSelect;

@@ -1,12 +1,23 @@
 import { and, asc, count, desc, eq, like, or, sql } from 'drizzle-orm';
 
 import { db } from '@/db/client';
-import { adminUsers, articles, attempts, campaignCurrentArticles, campaigns, students } from '@/db/schema';
+import { adminUsers, articles, attempts, students } from '@/db/schema';
+import { MAX_ATTEMPTS_PER_STUDENT, TEST_DURATION_SECONDS } from '@/lib/env';
 
 type StudentIdentityInput = {
   studentNo: string;
   name: string;
   campusEmail: string;
+};
+
+type RotatingArticle = {
+  articleId: number;
+  title: string;
+  slug: string;
+  language: 'en' | 'zh';
+  status: 'draft' | 'published' | 'archived';
+  contentRaw: string;
+  source: string | null;
 };
 
 export type LeaderboardEntry = {
@@ -35,7 +46,7 @@ function deterministicIndex(total: number, seed: string) {
   return value % total;
 }
 
-async function getRotatingArticlePool() {
+async function getRotatingArticlePool(): Promise<RotatingArticle[]> {
   const publishedArticles = await db
     .select({
       articleId: articles.id,
@@ -51,21 +62,17 @@ async function getRotatingArticlePool() {
     .orderBy(asc(articles.slug));
 
   const withoutDevSeed = publishedArticles.filter((article) => article.source !== 'seed:dev');
-
   return withoutDevSeed.length > 0 ? withoutDevSeed : publishedArticles;
 }
 
-async function getCampaignById(id: number) {
-  return db.query.campaigns.findFirst({
-    where: eq(campaigns.id, id),
-  });
-}
+export async function getCurrentRotatingArticle() {
+  const pool = await getRotatingArticlePool();
 
-async function getLatestCampaignCurrentArticle(campaignId: number) {
-  return db.query.campaignCurrentArticles.findFirst({
-    where: eq(campaignCurrentArticles.campaignId, campaignId),
-    orderBy: [desc(campaignCurrentArticles.createdAt)],
-  });
+  if (pool.length === 0) {
+    return null;
+  }
+
+  return pool[deterministicIndex(pool.length, todayKey())] ?? pool[0];
 }
 
 export async function getStudentByIdentity(input: StudentIdentityInput) {
@@ -111,115 +118,10 @@ export async function getStudentsList(search?: string) {
     .orderBy(desc(students.createdAt), asc(students.studentNo));
 }
 
-export async function getActiveCampaign() {
-  return db.query.campaigns.findFirst({
-    where: eq(campaigns.status, 'active'),
-    orderBy: [desc(campaigns.updatedAt), desc(campaigns.createdAt)],
-  });
-}
-
-async function resolveCurrentArticleForCampaign(campaignId: number) {
-  const campaign = await getCampaignById(campaignId);
-
-  if (!campaign) {
-    return null;
-  }
-
-  const pool = await getRotatingArticlePool();
-
-  if (pool.length === 0) {
-    return null;
-  }
-
-  if (campaign.articleStrategy === 'fixed') {
-    const today = todayKey();
-    const existingToday = await db.query.campaignCurrentArticles.findFirst({
-      where: and(
-        eq(campaignCurrentArticles.campaignId, campaignId),
-        eq(campaignCurrentArticles.resolvedDate, today),
-      ),
-      orderBy: [desc(campaignCurrentArticles.createdAt)],
-    });
-
-    if (existingToday) {
-      const matched = pool.find((article) => article.articleId === existingToday.articleId);
-      if (matched) {
-        return matched;
-      }
-    }
-
-    const selected = pool[deterministicIndex(pool.length, today)] ?? pool[0];
-
-    await db.insert(campaignCurrentArticles).values({
-      campaignId,
-      articleId: selected.articleId,
-      reason: 'manual',
-      resolvedDate: today,
-    });
-
-    return selected;
-  }
-
-  const latestCurrent = await getLatestCampaignCurrentArticle(campaignId);
-  const fallbackArticle = pool[0];
-
-  if (campaign.articleStrategy === 'shuffle_once') {
-    if (latestCurrent) {
-      const matched = pool.find((article) => article.articleId === latestCurrent.articleId);
-      if (matched) {
-        return matched;
-      }
-    }
-
-    const selected = pool[Math.floor(Math.random() * pool.length)] ?? fallbackArticle;
-    await db.insert(campaignCurrentArticles).values({
-      campaignId,
-      articleId: selected.articleId,
-      reason: 'shuffle_once',
-      resolvedDate: todayKey(),
-    });
-    return selected;
-  }
-
-  const today = todayKey();
-  const todayCurrent = await db.query.campaignCurrentArticles.findFirst({
-    where: and(
-      eq(campaignCurrentArticles.campaignId, campaignId),
-      eq(campaignCurrentArticles.reason, 'daily_random'),
-      eq(campaignCurrentArticles.resolvedDate, today),
-    ),
-    orderBy: [desc(campaignCurrentArticles.createdAt)],
-  });
-
-  if (todayCurrent) {
-    const matched = pool.find((article) => article.articleId === todayCurrent.articleId);
-    if (matched) {
-      return matched;
-    }
-  }
-
-  const selected = pool[deterministicIndex(pool.length, today)] ?? fallbackArticle;
-
-  await db.insert(campaignCurrentArticles).values({
-    campaignId,
-    articleId: selected.articleId,
-    reason: 'daily_random',
-    resolvedDate: today,
-  });
-
-  return selected;
-}
-
 export async function ensureAttemptForStudent(studentId: number) {
-  const activeCampaign = await getActiveCampaign();
-
-  if (!activeCampaign) {
-    return { state: 'no-campaign' as const };
-  }
-
   const [student, currentArticle] = await Promise.all([
     db.query.students.findFirst({ where: eq(students.id, studentId) }),
-    resolveCurrentArticleForCampaign(activeCampaign.id),
+    getCurrentRotatingArticle(),
   ]);
 
   if (!student) {
@@ -227,18 +129,17 @@ export async function ensureAttemptForStudent(studentId: number) {
   }
 
   if (!currentArticle) {
-    return { state: 'no-article' as const, campaign: activeCampaign };
+    return { state: 'no-article' as const };
   }
 
   const latestAttempt = await db.query.attempts.findFirst({
-    where: and(eq(attempts.campaignId, activeCampaign.id), eq(attempts.studentId, studentId)),
+    where: eq(attempts.studentId, studentId),
     orderBy: [desc(attempts.attemptNo), desc(attempts.createdAt)],
   });
 
   if (latestAttempt?.status === 'started') {
     return {
       state: 'ready' as const,
-      campaign: activeCampaign,
       article: currentArticle,
       attempt: latestAttempt,
     };
@@ -247,17 +148,14 @@ export async function ensureAttemptForStudent(studentId: number) {
   const totalAttempts = await db
     .select({ count: count() })
     .from(attempts)
-    .where(and(eq(attempts.campaignId, activeCampaign.id), eq(attempts.studentId, studentId)))
+    .where(eq(attempts.studentId, studentId))
     .get();
 
   const usedAttempts = totalAttempts?.count ?? 0;
-  const maxAttempts = activeCampaign.maxAttemptsPerStudent;
-  const retriesAllowed = activeCampaign.allowRetry;
 
-  if ((retriesAllowed && usedAttempts >= maxAttempts) || (!retriesAllowed && usedAttempts >= 1)) {
+  if (usedAttempts >= MAX_ATTEMPTS_PER_STUDENT) {
     return {
       state: 'locked' as const,
-      campaign: activeCampaign,
       article: currentArticle,
       latestAttempt,
     };
@@ -266,7 +164,6 @@ export async function ensureAttemptForStudent(studentId: number) {
   const attemptNo = usedAttempts + 1;
 
   await db.insert(attempts).values({
-    campaignId: activeCampaign.id,
     studentId: student.id,
     articleId: currentArticle.articleId,
     attemptNo,
@@ -275,7 +172,7 @@ export async function ensureAttemptForStudent(studentId: number) {
     studentNameSnapshot: student.name,
     campusEmailSnapshot: student.campusEmail,
     articleTitleSnapshot: currentArticle.title,
-    durationSecondsAllocated: activeCampaign.durationSeconds,
+    durationSecondsAllocated: TEST_DURATION_SECONDS,
     typedTextRaw: '',
     typedTextNormalized: '',
     suspicionFlags: [],
@@ -283,16 +180,11 @@ export async function ensureAttemptForStudent(studentId: number) {
   });
 
   const attempt = await db.query.attempts.findFirst({
-    where: and(
-      eq(attempts.campaignId, activeCampaign.id),
-      eq(attempts.studentId, student.id),
-      eq(attempts.attemptNo, attemptNo),
-    ),
+    where: and(eq(attempts.studentId, student.id), eq(attempts.attemptNo, attemptNo)),
   });
 
   return {
     state: 'ready' as const,
-    campaign: activeCampaign,
     article: currentArticle,
     attempt,
   };
@@ -302,8 +194,6 @@ export async function getAttemptDetail(attemptId: number) {
   return db
     .select({
       attemptId: attempts.id,
-      campaignId: attempts.campaignId,
-      campaignName: campaigns.name,
       articleId: attempts.articleId,
       articleTitle: attempts.articleTitleSnapshot,
       studentId: attempts.studentId,
@@ -328,13 +218,12 @@ export async function getAttemptDetail(attemptId: number) {
       articleContent: articles.contentRaw,
     })
     .from(attempts)
-    .leftJoin(campaigns, eq(campaigns.id, attempts.campaignId))
     .leftJoin(articles, eq(articles.id, attempts.articleId))
     .where(eq(attempts.id, attemptId))
     .get();
 }
 
-export async function getLeaderboard(campaignId: number): Promise<LeaderboardEntry[]> {
+export async function getLeaderboard(): Promise<LeaderboardEntry[]> {
   const rows = await db
     .select({
       attemptId: attempts.id,
@@ -346,10 +235,9 @@ export async function getLeaderboard(campaignId: number): Promise<LeaderboardEnt
       accuracy: attempts.accuracy,
       submittedAt: attempts.submittedAt,
       attemptNo: attempts.attemptNo,
-      status: attempts.status,
     })
     .from(attempts)
-    .where(and(eq(attempts.campaignId, campaignId), eq(attempts.status, 'submitted')))
+    .where(eq(attempts.status, 'submitted'))
     .orderBy(desc(attempts.scoreKpm), desc(attempts.accuracy), asc(attempts.submittedAt));
 
   const bestByStudent = new Map<number, LeaderboardEntry>();

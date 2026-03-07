@@ -5,34 +5,20 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { requireStudent } from '@/lib/auth/guards'
-import { getActiveCampaign, getLeaderboard } from '@/lib/data/queries'
+import { getCurrentRotatingArticle, getLeaderboard } from '@/lib/data/queries'
 import { formatKpm, formatPercent } from '@/lib/format'
 
 export default async function RankingPage() {
   const { student } = await requireStudent()
-  const activeCampaign = await getActiveCampaign()
-
-  if (!activeCampaign) {
-    return (
-      <main className="min-h-screen bg-background px-4 py-8">
-        <div className="mx-auto max-w-5xl">
-          <Card>
-            <CardHeader><CardTitle>暂无排行榜</CardTitle><CardDescription>当前没有激活场次。</CardDescription></CardHeader>
-            <CardContent><p className="text-sm text-muted-foreground">请等待管理员激活场次后再查看。</p></CardContent>
-          </Card>
-        </div>
-      </main>
-    )
-  }
-
-  const leaderboard = await getLeaderboard(activeCampaign.id)
+  const currentArticle = await getCurrentRotatingArticle()
+  const leaderboard = await getLeaderboard()
 
   return (
     <main className="min-h-screen bg-background px-4 py-8 md:px-6">
       <div className="mx-auto max-w-6xl space-y-6">
         <header className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <p className="text-sm text-muted-foreground">当前测试：{activeCampaign.name}</p>
+            <p className="text-sm text-muted-foreground">当前文章：{currentArticle?.title ?? '未设置'}</p>
             <h1 className="text-3xl font-semibold tracking-tight">排行榜</h1>
           </div>
           <div className="flex gap-3">
@@ -42,7 +28,7 @@ export default async function RankingPage() {
         </header>
 
         <Card>
-          <CardHeader><CardTitle>最佳成绩榜</CardTitle><CardDescription>每位学生按当前测试最佳成绩上榜。</CardDescription></CardHeader>
+          <CardHeader><CardTitle>最佳成绩榜</CardTitle><CardDescription>每位学生按当前最佳成绩上榜。</CardDescription></CardHeader>
           <CardContent>
             <Table>
               <TableHeader>
