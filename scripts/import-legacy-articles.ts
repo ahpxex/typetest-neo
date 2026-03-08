@@ -7,6 +7,7 @@ import { normalizeTypingText } from '@/modules/typing-engine'
 import { slugify } from '@/lib/format'
 
 const LEGACY_ARTICLE_DIR = join(process.cwd(), 'ref', 'typeeasy_final2022_10_18', 'continue')
+const CJK_PATTERN = /[\u4e00-\u9fff]/
 
 const NAMED_ENTITY_MAP: Record<string, string> = {
   amp: '&',
@@ -81,6 +82,11 @@ async function importLegacyArticles() {
 
     if (!contentRaw) {
       console.warn(`Skipped ${fileName}: no content extracted`)
+      continue
+    }
+
+    if (CJK_PATTERN.test(title) || CJK_PATTERN.test(contentRaw)) {
+      console.warn(`Skipped ${fileName}: mixed Chinese content detected`)
       continue
     }
 
