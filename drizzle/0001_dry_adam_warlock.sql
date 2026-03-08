@@ -1,0 +1,1 @@
+ALTER TABLE `attempts` DROP COLUMN `paste_count`;

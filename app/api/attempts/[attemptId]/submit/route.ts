@@ -33,7 +33,6 @@ export async function POST(
     typedTextRaw?: string;
     durationSecondsUsed?: number;
     backspaceCount?: number;
-    pasteCount?: number;
     inputCharCount?: number;
     mistypedCharCount?: number;
     clientMeta?: Record<string, unknown>;
@@ -62,7 +61,6 @@ export async function POST(
   });
 
   const suspicionFlags: string[] = [];
-  if ((payload.pasteCount ?? 0) > 0) suspicionFlags.push('paste_detected');
   if (metrics.scoreKpm > 900) suspicionFlags.push('score_unusually_high');
   if (durationSecondsUsed < 10 && metrics.charCountTyped > 20) suspicionFlags.push('submitted_too_fast');
 
@@ -76,7 +74,6 @@ export async function POST(
     charCountCorrect: metrics.charCountCorrect,
     charCountError: metrics.charCountError,
     backspaceCount: payload.backspaceCount ?? 0,
-    pasteCount: payload.pasteCount ?? 0,
     clientMeta: payload.clientMeta ?? {},
     suspicionFlags,
     scoreKpm: metrics.scoreKpm,

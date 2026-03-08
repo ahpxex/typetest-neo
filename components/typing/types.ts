@@ -24,7 +24,6 @@ export type TypingViewportProps = {
   textMeasureRef: React.RefObject<HTMLDivElement | null>;
   onInputValue: (value: string) => void;
   onBackspace: () => void;
-  onPaste: () => void;
   onFocusChange: (focused: boolean) => void;
   onFocusTypingArea: () => void;
 };
@@ -36,7 +35,6 @@ export type TypingStatsBarProps = {
   progress: number;
   charCountError: number;
   backspaceCount: number;
-  pasteCount: number;
   submitting: boolean;
   isDevTimerPaused: boolean;
   onSubmit: () => void;

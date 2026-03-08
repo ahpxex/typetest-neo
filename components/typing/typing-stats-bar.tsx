@@ -46,7 +46,6 @@ export const TypingStatsBar = memo(function TypingStatsBar({
   progress,
   charCountError,
   backspaceCount,
-  pasteCount,
   submitting,
   isDevTimerPaused,
   onSubmit,
@@ -67,7 +66,6 @@ export const TypingStatsBar = memo(function TypingStatsBar({
         <FloatingMetric label="进度" value={`${progress}%`} />
         <FloatingMetric label="错误" value={`${charCountError}`} />
         <FloatingMetric label="退格" value={`${backspaceCount}`} />
-        <FloatingMetric label="粘贴" value={`${pasteCount}`} />
         <Button type="button" size="sm" className="rounded-full px-3 py-2 text-sm shadow-none" onMouseDown={(event) => event.preventDefault()} onClick={onSubmit} disabled={submitting}>
           {submitting ? '提交中…' : '提交成绩'}
         </Button>

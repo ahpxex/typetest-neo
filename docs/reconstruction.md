@@ -459,7 +459,6 @@ docs/
 - `char_count_correct`
 - `char_count_error`
 - `backspace_count`
-- `paste_count`
 - `suspicion_flags`：JSON 字段
 - `wpm_or_kpm`
 - `accuracy`
@@ -627,7 +626,7 @@ docs/
 
 建议采用以下策略：
 
-- 前端禁用粘贴，但服务端仍记录 `paste_count`，不信任客户端为 0。
+- 前端禁用粘贴与拖拽输入，防止最直接的整段灌入。
 - 服务端根据 `started_at` 和 `submitted_at` 计算实际用时。
 - 若提交速度异常高，打上 `suspicion_flags`。
 - 若完成时间远短于理论极限，标记可疑。

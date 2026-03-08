@@ -122,7 +122,6 @@ export const attempts = sqliteTable(
     charCountCorrect: integer('char_count_correct').notNull().default(0),
     charCountError: integer('char_count_error').notNull().default(0),
     backspaceCount: integer('backspace_count').notNull().default(0),
-    pasteCount: integer('paste_count').notNull().default(0),
     suspicionFlags: text('suspicion_flags', { mode: 'json' })
       .$type<string[]>()
       .notNull()

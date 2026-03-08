@@ -138,7 +138,6 @@ export function TypingTestClient({
   const [renderedText, setRenderedText] = useState('');
   const [historicalAccuracyStats, setHistoricalAccuracyStats] = useState<HistoricalAccuracyStats>(EMPTY_HISTORICAL_ACCURACY_STATS);
   const [backspaceCount, setBackspaceCount] = useState(0);
-  const [pasteCount, setPasteCount] = useState(0);
   const [nowMs, setNowMs] = useState(Date.now());
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -180,7 +179,6 @@ export function TypingTestClient({
     setRenderedText(savedText);
     setHistoricalAccuracyStats(nextHistoricalAccuracyStats);
     setBackspaceCount(0);
-    setPasteCount(0);
     setError(null);
     setSubmitting(false);
 
@@ -341,7 +339,6 @@ export function TypingTestClient({
           typedTextRaw: typedTextRef.current,
           durationSecondsUsed: elapsedSeconds,
           backspaceCount,
-          pasteCount,
           inputCharCount: historicalAccuracyStatsRef.current.inputCharCount,
           mistypedCharCount: historicalAccuracyStatsRef.current.mistypedCharCount,
           clientMeta: {
@@ -370,7 +367,7 @@ export function TypingTestClient({
       setSubmitting(false);
       setError(submitError instanceof Error ? submitError.message : '成绩提交失败');
     }
-  }, [attemptId, backspaceCount, elapsedSeconds, pasteCount, router]);
+  }, [attemptId, backspaceCount, elapsedSeconds, router]);
 
   useEffect(() => {
     if (!isDevelopment && remainingSeconds === 0 && !submitLockRef.current) {
@@ -384,10 +381,6 @@ export function TypingTestClient({
 
   const handleBackspace = useCallback(() => {
     setBackspaceCount((value) => value + 1);
-  }, []);
-
-  const handlePaste = useCallback(() => {
-    setPasteCount((value) => value + 1);
   }, []);
 
   const toggleDevTimerPaused = useCallback(() => {
@@ -459,7 +452,6 @@ export function TypingTestClient({
         textMeasureRef={textMeasureRef}
         onInputValue={handleInputValue}
         onBackspace={handleBackspace}
-        onPaste={handlePaste}
         onFocusChange={setIsFocused}
         onFocusTypingArea={focusTypingArea}
       />
@@ -473,7 +465,6 @@ export function TypingTestClient({
         progress={metrics.progress}
         charCountError={metrics.charCountError}
         backspaceCount={backspaceCount}
-        pasteCount={pasteCount}
         submitting={submitting}
         isDevTimerPaused={isDevTimerPaused}
         onSubmit={() => void submitAttempt()}

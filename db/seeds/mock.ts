@@ -84,9 +84,7 @@ function buildSubmittedMetrics(index: number, attemptNo: number) {
   const charCountCorrect = Math.max(0, Math.min(charCountTyped, Math.round(charCountTyped * (accuracy / 100))));
   const charCountError = Math.max(0, charCountTyped - charCountCorrect);
   const backspaceCount = (index * 3 + attemptNo) % 12;
-  const pasteCount = index % 97 === 0 ? 1 : 0;
   const suspicionFlags = [
-    ...(pasteCount > 0 ? ['paste_detected'] : []),
     ...(scoreKpm >= 360 ? ['score_unusually_high'] : []),
   ];
 
@@ -98,7 +96,6 @@ function buildSubmittedMetrics(index: number, attemptNo: number) {
     charCountCorrect,
     charCountError,
     backspaceCount,
-    pasteCount,
     suspicionFlags,
   };
 }
@@ -214,7 +211,6 @@ function buildAttemptRows(mockStudents: MockStudentRow[], articlePool: ArticleRo
       charCountCorrect: primaryMetrics.charCountCorrect,
       charCountError: primaryMetrics.charCountError,
       backspaceCount: primaryMetrics.backspaceCount,
-      pasteCount: primaryMetrics.pasteCount,
       suspicionFlags: primaryMetrics.suspicionFlags,
       clientMeta: { seed: 'mock', batch: 'primary' },
       scoreKpm: primaryMetrics.scoreKpm,
@@ -249,7 +245,6 @@ function buildAttemptRows(mockStudents: MockStudentRow[], articlePool: ArticleRo
         charCountCorrect: secondMetrics.charCountCorrect,
         charCountError: secondMetrics.charCountError,
         backspaceCount: secondMetrics.backspaceCount,
-        pasteCount: secondMetrics.pasteCount,
         suspicionFlags: secondMetrics.suspicionFlags,
         clientMeta: { seed: 'mock', batch: 'secondary' },
         scoreKpm: secondMetrics.scoreKpm,
@@ -285,7 +280,6 @@ function buildAttemptRows(mockStudents: MockStudentRow[], articlePool: ArticleRo
         charCountCorrect: thirdMetrics.charCountCorrect,
         charCountError: thirdMetrics.charCountError,
         backspaceCount: thirdMetrics.backspaceCount,
-        pasteCount: thirdMetrics.pasteCount,
         suspicionFlags: [...thirdMetrics.suspicionFlags, 'manual_review'],
         clientMeta: { seed: 'mock', batch: 'invalidated' },
         scoreKpm: thirdMetrics.scoreKpm,

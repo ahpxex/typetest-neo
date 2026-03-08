@@ -17,7 +17,6 @@ export const TypingViewport = memo(function TypingViewport({
   textMeasureRef,
   onInputValue,
   onBackspace,
-  onPaste,
   onFocusChange,
   onFocusTypingArea,
 }: TypingViewportProps) {
@@ -41,7 +40,12 @@ export const TypingViewport = memo(function TypingViewport({
           onChange={(event) => onInputValue(event.target.value)}
           onFocus={() => onFocusChange(true)}
           onBlur={() => onFocusChange(false)}
-          onPaste={onPaste}
+          onPaste={(event) => {
+            event.preventDefault();
+          }}
+          onDrop={(event) => {
+            event.preventDefault();
+          }}
           onKeyDown={(event) => {
             if (event.key === 'Backspace') {
               onBackspace();

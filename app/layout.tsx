@@ -48,6 +48,10 @@ export default function RootLayout({
             strategy='lazyOnload'
           />
         )}
+        <Script id="computer-association-console-ad" strategy="afterInteractive">{`
+          console.log('%c欢迎加入计算机协会', 'background:#ac3532;color:#fff7f5;padding:10px 16px;border-radius:8px;font-size:18px;font-weight:700;');
+          console.log('%c一起写代码、做项目、折腾有意思的东西。', 'color:#ac3532;font-size:13px;font-weight:600;');
+        `}</Script>
       </head>
       <body className={`${geistSans.variable} ${geistMono.variable} bg-zinc-50 text-zinc-950 antialiased`}>
         {children}

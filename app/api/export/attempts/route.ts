@@ -37,7 +37,6 @@ export async function GET() {
     'submitted_at',
     'duration_seconds_used',
     'backspace_count',
-    'paste_count',
     'suspicion_flags',
     'ip_address',
   ];
@@ -61,7 +60,6 @@ export async function GET() {
         formatDateTime(row.submittedAt),
         row.durationSecondsUsed ?? '',
         row.backspaceCount,
-        row.pasteCount,
         row.suspicionFlags.join('|'),
         row.ipAddress ?? '',
       ]
