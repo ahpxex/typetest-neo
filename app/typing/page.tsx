@@ -2,18 +2,20 @@ import Link from 'next/link';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { PracticeArticleLauncher } from '@/components/typing/practice-article-launcher';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { StudentPageShell } from '@/components/typing/student-page-shell';
 import { requireStudent } from '@/lib/auth/guards';
-import { getCurrentRotatingArticle, getStudentDashboard, type StudentRecentAttemptSummary } from '@/lib/data/queries';
+import { getCurrentRotatingArticle, getPracticeArticles, getStudentDashboard, type StudentRecentAttemptSummary } from '@/lib/data/queries';
 import { formatDateTime, formatKpm, formatPercent } from '@/lib/format';
 import { getAttemptModeLabel, type AttemptMode } from '@/lib/attempt-mode';
 
 export default async function TypingHomePage() {
   const { student } = await requireStudent();
-  const [dashboard, currentArticle] = await Promise.all([
+  const [dashboard, currentArticle, practiceArticles] = await Promise.all([
     getStudentDashboard(student.id),
     getCurrentRotatingArticle(),
+    getPracticeArticles(),
   ]);
 
   if (!dashboard) {
@@ -42,28 +44,39 @@ export default async function TypingHomePage() {
       <div className="flex min-h-0 flex-1 overflow-auto">
         <div className="mx-auto grid w-full max-w-5xl content-start gap-6 py-4 xl:grid-cols-2 xl:items-start">
           <ModeCard
-          title="练习"
-          description="练习不会进入正式排行榜，可以随时继续。"
-          href="/typing/practice"
-          actionLabel="开始练习"
-          bestLabel="最佳练习成绩"
-          bestScore={dashboard.bestPracticeScoreKpm}
-          bestAccuracy={dashboard.bestPracticeAccuracy}
-          currentArticleTitle={currentArticle?.title ?? '未设置'}
-          attempts={dashboard.practiceAttempts}
-          mode="practice"
-        />
+            title="练习"
+            description="练习不会进入正式排行榜，可以随时继续。"
+            bestLabel="最佳练习成绩"
+            bestScore={dashboard.bestPracticeScoreKpm}
+            bestAccuracy={dashboard.bestPracticeAccuracy}
+            currentArticleTitle={currentArticle?.title ?? '未设置'}
+            attempts={dashboard.practiceAttempts}
+            mode="practice"
+            hideDefaultSummary
+            launcher={
+              <PracticeArticleLauncher
+                articles={practiceArticles}
+                defaultArticleId={currentArticle?.articleId ?? practiceArticles[0]?.articleId ?? 0}
+                bestLabel="最佳练习成绩"
+                bestScore={dashboard.bestPracticeScoreKpm}
+                bestAccuracy={dashboard.bestPracticeAccuracy}
+              />
+            }
+          />
           <ModeCard
             title="考试"
             description="正式考试成绩会进入排行榜与后台统计。"
-            href="/typing/exam"
-            actionLabel="开始考试"
             bestLabel="最佳考试成绩"
             bestScore={dashboard.bestExamScoreKpm}
             bestAccuracy={dashboard.bestExamAccuracy}
             currentArticleTitle={currentArticle?.title ?? '未设置'}
             attempts={dashboard.examAttempts}
             mode="exam"
+            launcher={
+              <Button asChild className="w-full shrink-0">
+                <Link href="/typing/exam">开始考试</Link>
+              </Button>
+            }
           />
         </div>
       </div>
@@ -74,27 +87,27 @@ export default async function TypingHomePage() {
 type ModeCardProps = {
   title: string;
   description: string;
-  href: string;
-  actionLabel: string;
+  launcher: React.ReactNode;
   bestLabel: string;
   bestScore: number | null;
   bestAccuracy: number | null;
   currentArticleTitle: string;
   attempts: StudentRecentAttemptSummary[];
   mode: AttemptMode;
+  hideDefaultSummary?: boolean;
 };
 
 function ModeCard({
   title,
   description,
-  href,
-  actionLabel,
+  launcher,
   bestLabel,
   bestScore,
   bestAccuracy,
   currentArticleTitle,
   attempts,
   mode,
+  hideDefaultSummary = false,
 }: ModeCardProps) {
   return (
     <Card className="w-full self-start overflow-hidden shadow-sm">
@@ -108,16 +121,16 @@ function ModeCard({
         </div>
       </CardHeader>
       <CardContent className="flex min-h-0 flex-1 flex-col gap-4">
-        <div className="rounded-lg border border-border bg-muted/30 p-4 text-sm text-muted-foreground">
-          <p>当前文章：{currentArticleTitle}</p>
-          <p className="mt-1">
-            {bestLabel}：{bestScore === null ? '—' : `${formatKpm(bestScore)} · ${formatPercent(bestAccuracy ?? 0)}`}
-          </p>
-        </div>
+        {!hideDefaultSummary ? (
+          <div className="rounded-lg border border-border bg-muted/30 p-4 text-sm text-muted-foreground">
+            <p>当前文章：{currentArticleTitle}</p>
+            <p className="mt-1">
+              {bestLabel}：{bestScore === null ? '—' : `${formatKpm(bestScore)} · ${formatPercent(bestAccuracy ?? 0)}`}
+            </p>
+          </div>
+        ) : null}
 
-        <Button asChild className="w-full shrink-0">
-          <Link href={href}>{actionLabel}</Link>
-        </Button>
+        {launcher}
 
         <div className="min-h-0 flex-1 space-y-3 overflow-auto">
           <div>

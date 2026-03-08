@@ -21,6 +21,12 @@ type RotatingArticle = {
   source: string | null;
 };
 
+export type PracticeArticleOption = {
+  articleId: number;
+  title: string;
+  slug: string;
+};
+
 export type LeaderboardEntry = {
   rank: number;
   studentId: number;
@@ -102,6 +108,16 @@ export async function getCurrentRotatingArticle() {
   }
 
   return pool[deterministicIndex(pool.length, todayKey())] ?? pool[0];
+}
+
+export async function getPracticeArticles(): Promise<PracticeArticleOption[]> {
+  const pool = await getRotatingArticlePool();
+
+  return pool.map((article) => ({
+    articleId: article.articleId,
+    title: article.title,
+    slug: article.slug,
+  }));
 }
 
 export async function getStudentByIdentity(input: StudentIdentityInput) {
@@ -497,63 +513,85 @@ export async function getStudentDashboard(studentId: number): Promise<StudentDas
   };
 }
 
-export async function ensureAttemptForStudent(studentId: number, mode: AttemptMode) {
-  const [student, latestStartedAttempt, latestModeAttempt, currentArticle] = await Promise.all([
+export async function ensureAttemptForStudent(studentId: number, mode: AttemptMode, practiceArticleId?: number) {
+  const [student, currentArticle, practiceArticles, latestModeAttempt] = await Promise.all([
     db.query.students.findFirst({ where: eq(students.id, studentId) }),
-    db
-      .select({
-        id: attempts.id,
-        studentId: attempts.studentId,
-        articleId: attempts.articleId,
-        mode: attempts.mode,
-        attemptNo: attempts.attemptNo,
-        status: attempts.status,
-        studentNoSnapshot: attempts.studentNoSnapshot,
-        studentNameSnapshot: attempts.studentNameSnapshot,
-        campusEmailSnapshot: attempts.campusEmailSnapshot,
-        articleTitleSnapshot: attempts.articleTitleSnapshot,
-        startedAt: attempts.startedAt,
-        submittedAt: attempts.submittedAt,
-        durationSecondsAllocated: attempts.durationSecondsAllocated,
-        durationSecondsUsed: attempts.durationSecondsUsed,
-        typedTextRaw: attempts.typedTextRaw,
-        typedTextNormalized: attempts.typedTextNormalized,
-        charCountTyped: attempts.charCountTyped,
-        charCountCorrect: attempts.charCountCorrect,
-        charCountError: attempts.charCountError,
-        backspaceCount: attempts.backspaceCount,
-        pasteCount: attempts.pasteCount,
-        suspicionFlags: attempts.suspicionFlags,
-        clientMeta: attempts.clientMeta,
-        scoreKpm: attempts.scoreKpm,
-        accuracy: attempts.accuracy,
-        scoreVersion: attempts.scoreVersion,
-        ipAddress: attempts.ipAddress,
-        userAgent: attempts.userAgent,
-        createdAt: attempts.createdAt,
-        updatedAt: attempts.updatedAt,
-        title: articles.title,
-        slug: articles.slug,
-        language: articles.language,
-        articleStatus: articles.status,
-        contentRaw: articles.contentRaw,
-        source: articles.source,
-      })
-      .from(attempts)
-      .innerJoin(articles, eq(articles.id, attempts.articleId))
-      .where(and(eq(attempts.studentId, studentId), eq(attempts.mode, mode), eq(attempts.status, 'started')))
-      .orderBy(desc(attempts.createdAt), desc(attempts.attemptNo))
-      .get(),
+    getCurrentRotatingArticle(),
+    mode === 'practice' ? getRotatingArticlePool() : Promise.resolve<RotatingArticle[]>([]),
     db.query.attempts.findFirst({
       where: and(eq(attempts.studentId, studentId), eq(attempts.mode, mode)),
       orderBy: [desc(attempts.attemptNo), desc(attempts.createdAt)],
     }),
-    getCurrentRotatingArticle(),
   ]);
 
   if (!student) {
     return { state: 'missing-student' as const };
   }
+
+  const practiceTargetArticle = mode === 'practice'
+    ? practiceArticles.find((article) => article.articleId === practiceArticleId)
+      ?? (currentArticle ? practiceArticles.find((article) => article.articleId === currentArticle.articleId) : undefined)
+      ?? practiceArticles[0]
+      ?? null
+    : null;
+
+  const targetArticle = mode === 'practice' ? practiceTargetArticle : currentArticle;
+
+  if (!targetArticle) {
+    return { state: 'no-article' as const };
+  }
+
+  const latestStartedAttempt = await db
+    .select({
+      id: attempts.id,
+      studentId: attempts.studentId,
+      articleId: attempts.articleId,
+      mode: attempts.mode,
+      attemptNo: attempts.attemptNo,
+      status: attempts.status,
+      studentNoSnapshot: attempts.studentNoSnapshot,
+      studentNameSnapshot: attempts.studentNameSnapshot,
+      campusEmailSnapshot: attempts.campusEmailSnapshot,
+      articleTitleSnapshot: attempts.articleTitleSnapshot,
+      startedAt: attempts.startedAt,
+      submittedAt: attempts.submittedAt,
+      durationSecondsAllocated: attempts.durationSecondsAllocated,
+      durationSecondsUsed: attempts.durationSecondsUsed,
+      typedTextRaw: attempts.typedTextRaw,
+      typedTextNormalized: attempts.typedTextNormalized,
+      charCountTyped: attempts.charCountTyped,
+      charCountCorrect: attempts.charCountCorrect,
+      charCountError: attempts.charCountError,
+      backspaceCount: attempts.backspaceCount,
+      pasteCount: attempts.pasteCount,
+      suspicionFlags: attempts.suspicionFlags,
+      clientMeta: attempts.clientMeta,
+      scoreKpm: attempts.scoreKpm,
+      accuracy: attempts.accuracy,
+      scoreVersion: attempts.scoreVersion,
+      ipAddress: attempts.ipAddress,
+      userAgent: attempts.userAgent,
+      createdAt: attempts.createdAt,
+      updatedAt: attempts.updatedAt,
+      title: articles.title,
+      slug: articles.slug,
+      language: articles.language,
+      articleStatus: articles.status,
+      contentRaw: articles.contentRaw,
+      source: articles.source,
+    })
+    .from(attempts)
+    .innerJoin(articles, eq(articles.id, attempts.articleId))
+    .where(
+      and(
+        eq(attempts.studentId, studentId),
+        eq(attempts.mode, mode),
+        eq(attempts.status, 'started'),
+        mode === 'practice' ? eq(attempts.articleId, targetArticle.articleId) : undefined,
+      ),
+    )
+    .orderBy(desc(attempts.createdAt), desc(attempts.attemptNo))
+    .get();
 
   if (latestStartedAttempt) {
     return {
@@ -602,22 +640,25 @@ export async function ensureAttemptForStudent(studentId: number, mode: AttemptMo
     };
   }
 
-  if (!currentArticle) {
-    return { state: 'no-article' as const };
-  }
-
   const totalAttempts = await db
     .select({ count: count() })
     .from(attempts)
     .where(eq(attempts.studentId, studentId))
     .get();
 
-  const usedAttempts = totalAttempts?.count ?? 0;
+  const usedExamAttempts = await db
+    .select({ count: count() })
+    .from(attempts)
+    .where(and(eq(attempts.studentId, studentId), eq(attempts.mode, 'exam')))
+    .get();
 
-  if (mode === 'exam' && usedAttempts >= MAX_ATTEMPTS_PER_STUDENT) {
+  const usedAttempts = totalAttempts?.count ?? 0;
+  const usedExamAttemptCount = usedExamAttempts?.count ?? 0;
+
+  if (mode === 'exam' && usedExamAttemptCount >= MAX_ATTEMPTS_PER_STUDENT) {
     return {
       state: 'locked' as const,
-      article: currentArticle,
+      article: targetArticle,
       latestAttempt: latestModeAttempt,
     };
   }
@@ -626,14 +667,14 @@ export async function ensureAttemptForStudent(studentId: number, mode: AttemptMo
 
   await db.insert(attempts).values({
     studentId: student.id,
-    articleId: currentArticle.articleId,
+    articleId: targetArticle.articleId,
     mode,
     attemptNo,
     status: 'started',
     studentNoSnapshot: student.studentNo,
     studentNameSnapshot: student.name,
     campusEmailSnapshot: student.campusEmail,
-    articleTitleSnapshot: currentArticle.title,
+    articleTitleSnapshot: targetArticle.title,
     durationSecondsAllocated: TEST_DURATION_SECONDS,
     typedTextRaw: '',
     typedTextNormalized: '',
@@ -647,7 +688,7 @@ export async function ensureAttemptForStudent(studentId: number, mode: AttemptMo
 
   return {
     state: 'ready' as const,
-    article: currentArticle,
+    article: targetArticle,
     attempt,
   };
 }
