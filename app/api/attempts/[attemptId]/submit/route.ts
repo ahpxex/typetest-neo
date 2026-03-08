@@ -1,7 +1,7 @@
 import { and, eq } from 'drizzle-orm';
 import { NextResponse } from 'next/server';
 
-import { db } from '@/db/client';
+import { db, ensureDatabaseReady } from '@/db/client';
 import { attempts } from '@/db/schema';
 import { getCurrentStudent } from '@/lib/auth/session';
 import { getAttemptDetail } from '@/lib/data/queries';
@@ -11,6 +11,8 @@ export async function POST(
   request: Request,
   { params }: { params: Promise<{ attemptId: string }> },
 ) {
+  await ensureDatabaseReady();
+
   const currentStudent = await getCurrentStudent();
 
   if (!currentStudent) {
@@ -64,7 +66,7 @@ export async function POST(
   if (metrics.scoreKpm > 900) suspicionFlags.push('score_unusually_high');
   if (durationSecondsUsed < 10 && metrics.charCountTyped > 20) suspicionFlags.push('submitted_too_fast');
 
-  await db.update(attempts).set({
+  const updateResult = await db.update(attempts).set({
     status: 'submitted',
     submittedAt,
     durationSecondsUsed,
@@ -80,7 +82,15 @@ export async function POST(
     accuracy: strictAccuracy,
     scoreVersion: 'v2',
     updatedAt: new Date(),
-  }).where(and(eq(attempts.id, id), eq(attempts.studentId, currentStudent.student.id)));
+  }).where(and(
+    eq(attempts.id, id),
+    eq(attempts.studentId, currentStudent.student.id),
+    eq(attempts.status, 'started'),
+  ));
+
+  if (updateResult.rowsAffected === 0) {
+    return NextResponse.json({ redirectTo: `/result/${id}` });
+  }
 
   return NextResponse.json({ redirectTo: `/result/${id}` });
 }

@@ -3,7 +3,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { and, eq, gt } from 'drizzle-orm';
 import { cookies } from 'next/headers';
 
-import { db } from '@/db/client';
+import { db, ensureDatabaseReady } from '@/db/client';
 import { adminUsers, sessions, students } from '@/db/schema';
 import {
   ADMIN_SESSION_COOKIE,
@@ -39,12 +39,48 @@ function isIgnorableSessionReadError(error: unknown) {
 
   return message.includes('no such table: sessions')
     || message.includes('no such table')
-    || message.includes('unable to open database file')
-    || message.includes('database is locked');
+    || message.includes('unable to open database file');
+}
+
+function isRetryableDatabaseLockError(error: unknown) {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  const message = error.message.toLowerCase();
+  return message.includes('database is locked') || message.includes('database busy');
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
+async function withDatabaseRetry<T>(label: string, action: () => Promise<T>) {
+  const maxAttempts = 4;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      await ensureDatabaseReady();
+      return await action();
+    } catch (error) {
+      if (!isRetryableDatabaseLockError(error) || attempt === maxAttempts) {
+        throw error;
+      }
+
+      console.warn(`[db] ${label} hit a database lock, retrying (${attempt}/${maxAttempts})`);
+      await sleep(attempt * 50);
+    }
+  }
+
+  throw new Error(`[db] ${label} exhausted retry attempts.`);
 }
 
 async function revokeSessionRecord(tokenHash: string) {
-  await db.delete(sessions).where(eq(sessions.tokenHash, tokenHash));
+  await withDatabaseRetry('revokeSessionRecord', async () => {
+    await db.delete(sessions).where(eq(sessions.tokenHash, tokenHash));
+  });
 }
 
 export async function createSession(userType: SessionUserType, userId: number) {
@@ -52,12 +88,14 @@ export async function createSession(userType: SessionUserType, userId: number) {
   const tokenHash = hashToken(token);
   const expiresAt = new Date(Date.now() + SESSION_DURATION_HOURS * 60 * 60 * 1000);
 
-  await db.insert(sessions).values({
-    userType,
-    userId,
-    tokenHash,
-    expiresAt,
-    metadata: {},
+  await withDatabaseRetry('createSession', async () => {
+    await db.insert(sessions).values({
+      userType,
+      userId,
+      tokenHash,
+      expiresAt,
+      metadata: {},
+    });
   });
 
   const cookieStore = await cookies();
@@ -93,13 +131,15 @@ async function readSessionByType(userType: SessionUserType): Promise<AppSession 
   const now = new Date();
 
   try {
-    const sessionRecord = await db.query.sessions.findFirst({
-      where: and(
-        eq(sessions.userType, userType),
-        eq(sessions.tokenHash, tokenHash),
-        gt(sessions.expiresAt, now),
-      ),
-    });
+    const sessionRecord = await withDatabaseRetry('readSessionByType', async () => (
+      db.query.sessions.findFirst({
+        where: and(
+          eq(sessions.userType, userType),
+          eq(sessions.tokenHash, tokenHash),
+          gt(sessions.expiresAt, now),
+        ),
+      })
+    ));
 
     if (!sessionRecord) {
       return null;
@@ -137,9 +177,11 @@ export async function getCurrentStudent() {
     return null;
   }
 
-  const student = await db.query.students.findFirst({
-    where: eq(students.id, session.userId),
-  });
+  const student = await withDatabaseRetry('getCurrentStudent', async () => (
+    db.query.students.findFirst({
+      where: eq(students.id, session.userId),
+    })
+  ));
 
   if (!student) {
     await revokeSessionRecord(session.tokenHash);
@@ -156,9 +198,11 @@ export async function getCurrentAdmin() {
     return null;
   }
 
-  const admin = await db.query.adminUsers.findFirst({
-    where: eq(adminUsers.id, session.userId),
-  });
+  const admin = await withDatabaseRetry('getCurrentAdmin', async () => (
+    db.query.adminUsers.findFirst({
+      where: eq(adminUsers.id, session.userId),
+    })
+  ));
 
   if (!admin) {
     await revokeSessionRecord(session.tokenHash);
