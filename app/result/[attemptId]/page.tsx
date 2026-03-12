@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 
+import { SessionKeepAlive } from '@/components/auth/session-keepalive'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -31,6 +32,7 @@ export default async function ResultPage({ params }: { params: Promise<{ attempt
 
   return (
     <main className="flex min-h-screen items-center justify-center bg-background px-4 py-8 md:px-6">
+      <SessionKeepAlive userType={viewer.type} />
       <div className="w-full max-w-4xl">
         <Card>
           <CardHeader>

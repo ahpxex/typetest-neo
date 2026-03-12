@@ -1,5 +1,6 @@
 import Link from 'next/link';
 
+import { SessionKeepAlive } from '@/components/auth/session-keepalive';
 import { Button } from '@/components/ui/button';
 import { logoutAction } from '@/features/auth/actions';
 
@@ -22,6 +23,7 @@ export function StudentPageShell({
 }: StudentPageShellProps) {
   return (
     <main className="h-screen overflow-hidden bg-background px-4 py-4 md:px-6 md:py-5">
+      <SessionKeepAlive userType="student" />
       <div className="mx-auto flex h-full max-w-7xl flex-col gap-4 overflow-hidden">
         <header className="shrink-0 border-b border-border pb-3">
           <p className="text-xs font-semibold uppercase tracking-[0.24em] text-muted-foreground">Student</p>

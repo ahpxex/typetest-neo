@@ -1,5 +1,6 @@
 import Link from 'next/link'
 
+import { SessionKeepAlive } from '@/components/auth/session-keepalive'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -15,6 +16,7 @@ export default async function RankingPage() {
 
   return (
     <main className="min-h-screen bg-background px-4 py-8 md:px-6">
+      <SessionKeepAlive userType="student" />
       <div className="mx-auto max-w-6xl space-y-6">
         <header className="flex flex-wrap items-center justify-between gap-3">
           <div>

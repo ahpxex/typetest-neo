@@ -144,7 +144,7 @@ async function prepareAttempts(dbUrl: string, concurrency: number) {
   });
 
   const maxAttemptMap = new Map<number, number>();
-  for (const row of maxAttemptResult.rows as Array<{ student_id: number; max_attempt_no: number | null }>) {
+  for (const row of maxAttemptResult.rows as unknown as Array<{ student_id: number; max_attempt_no: number | null }>) {
     maxAttemptMap.set(Number(row.student_id), Number(row.max_attempt_no ?? 0));
   }
 

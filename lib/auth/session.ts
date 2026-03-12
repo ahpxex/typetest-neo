@@ -7,7 +7,7 @@ import { db, ensureDatabaseReady } from '@/db/client';
 import { adminUsers, sessions, students } from '@/db/schema';
 import {
   ADMIN_SESSION_COOKIE,
-  SESSION_DURATION_HOURS,
+  SESSION_DURATION_DAYS,
   STUDENT_SESSION_COOKIE,
   isDevelopment,
 } from '@/lib/env';
@@ -28,6 +28,22 @@ function getCookieName(userType: SessionUserType) {
 
 function hashToken(token: string) {
   return createHash('sha256').update(token).digest('hex');
+}
+
+function getSessionExpiresAt() {
+  return new Date(Date.now() + SESSION_DURATION_DAYS * 24 * 60 * 60 * 1000);
+}
+
+async function setSessionCookie(userType: SessionUserType, token: string, expiresAt: Date) {
+  const cookieStore = await cookies();
+
+  cookieStore.set(getCookieName(userType), token, {
+    httpOnly: true,
+    sameSite: 'lax',
+    secure: !isDevelopment,
+    path: '/',
+    expires: expiresAt,
+  });
 }
 
 function isIgnorableSessionReadError(error: unknown) {
@@ -86,7 +102,7 @@ async function revokeSessionRecord(tokenHash: string) {
 export async function createSession(userType: SessionUserType, userId: number) {
   const token = randomBytes(24).toString('hex');
   const tokenHash = hashToken(token);
-  const expiresAt = new Date(Date.now() + SESSION_DURATION_HOURS * 60 * 60 * 1000);
+  const expiresAt = getSessionExpiresAt();
 
   await withDatabaseRetry('createSession', async () => {
     await db.insert(sessions).values({
@@ -98,14 +114,7 @@ export async function createSession(userType: SessionUserType, userId: number) {
     });
   });
 
-  const cookieStore = await cookies();
-  cookieStore.set(getCookieName(userType), token, {
-    httpOnly: true,
-    sameSite: 'lax',
-    secure: !isDevelopment,
-    path: '/',
-    expires: expiresAt,
-  });
+  await setSessionCookie(userType, token, expiresAt);
 }
 
 export async function clearSession(userType: SessionUserType) {
@@ -125,6 +134,46 @@ export async function revokeSessionsForUser(userType: SessionUserType, userId: n
       .delete(sessions)
       .where(and(eq(sessions.userType, userType), eq(sessions.userId, userId)));
   });
+}
+
+export async function refreshSession(userType: SessionUserType) {
+  const cookieStore = await cookies();
+  const token = cookieStore.get(getCookieName(userType))?.value;
+
+  if (!token) {
+    return false;
+  }
+
+  const tokenHash = hashToken(token);
+  const now = new Date();
+  const expiresAt = getSessionExpiresAt();
+
+  const sessionRecord = await withDatabaseRetry('refreshSession', async () => (
+    db.query.sessions.findFirst({
+      where: and(
+        eq(sessions.userType, userType),
+        eq(sessions.tokenHash, tokenHash),
+        gt(sessions.expiresAt, now),
+      ),
+    })
+  ));
+
+  if (!sessionRecord) {
+    return false;
+  }
+
+  await withDatabaseRetry('refreshSessionExpiry', async () => {
+    await db
+      .update(sessions)
+      .set({
+        expiresAt,
+        lastSeenAt: now,
+      })
+      .where(eq(sessions.id, sessionRecord.id));
+  });
+
+  await setSessionCookie(userType, token, expiresAt);
+  return true;
 }
 
 async function readSessionByType(userType: SessionUserType): Promise<AppSession | null> {
