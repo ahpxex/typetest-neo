@@ -15,6 +15,20 @@
       "when": 1772996516075,
       "tag": "0001_dry_adam_warlock",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1773335810840,
+      "tag": "0002_mysterious_titanium_man",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1773339394593,
+      "tag": "0003_ancient_nomad",
+      "breakpoints": true
     }
   ]
 }

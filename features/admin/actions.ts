@@ -1,12 +1,13 @@
 'use server';
 
-import { eq } from 'drizzle-orm';
+import { and, eq, isNull } from 'drizzle-orm';
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { z } from 'zod';
 
 import { db } from '@/db/client';
-import { students } from '@/db/schema';
+import { studentEmailVerificationTokens, students } from '@/db/schema';
+import { revokeSessionsForUser } from '@/lib/auth/session';
 import { isCampusEmailMatch, parseStudentIdentity } from '@/lib/student-identity';
 
 function getRedirectTarget(formData: FormData, fallback: string) {
@@ -162,14 +163,29 @@ export async function updateStudentStatusAction(formData: FormData) {
   const redirectTo = getRedirectTarget(formData, '/admin');
   const studentId = z.coerce.number().int().positive().parse(formData.get('studentId'));
   const status = z.enum(['active', 'inactive']).parse(formData.get('status'));
+  const now = new Date();
 
   await db
     .update(students)
     .set({
       status,
-      updatedAt: new Date(),
+      updatedAt: now,
     })
     .where(eq(students.id, studentId));
+
+  if (status === 'inactive') {
+    await revokeSessionsForUser('student', studentId);
+
+    await db
+      .update(studentEmailVerificationTokens)
+      .set({ consumedAt: now })
+      .where(
+        and(
+          eq(studentEmailVerificationTokens.studentId, studentId),
+          isNull(studentEmailVerificationTokens.consumedAt),
+        ),
+      );
+  }
 
   revalidatePath('/admin');
   redirectWithNotice(redirectTo, 'success', '学生状态已更新');

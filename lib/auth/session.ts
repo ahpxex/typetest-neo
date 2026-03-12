@@ -119,6 +119,14 @@ export async function clearSession(userType: SessionUserType) {
   cookieStore.delete(getCookieName(userType));
 }
 
+export async function revokeSessionsForUser(userType: SessionUserType, userId: number) {
+  await withDatabaseRetry('revokeSessionsForUser', async () => {
+    await db
+      .delete(sessions)
+      .where(and(eq(sessions.userType, userType), eq(sessions.userId, userId)));
+  });
+}
+
 async function readSessionByType(userType: SessionUserType): Promise<AppSession | null> {
   const cookieStore = await cookies();
   const token = cookieStore.get(getCookieName(userType))?.value;
@@ -188,6 +196,11 @@ export async function getCurrentStudent() {
     return null;
   }
 
+  if (student.status !== 'active') {
+    await revokeSessionRecord(session.tokenHash);
+    return null;
+  }
+
   return { session, student };
 }
 
@@ -205,6 +218,11 @@ export async function getCurrentAdmin() {
   ));
 
   if (!admin) {
+    await revokeSessionRecord(session.tokenHash);
+    return null;
+  }
+
+  if (admin.status !== 'active') {
     await revokeSessionRecord(session.tokenHash);
     return null;
   }

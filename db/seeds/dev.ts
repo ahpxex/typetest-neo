@@ -15,6 +15,7 @@ const DEV_STUDENT = {
   studentNo: '20261141128',
   name: '测试学生',
   campusEmail: buildCampusEmail('20261141128'),
+  password: 'student123456',
 } as const;
 
 const DEV_ARTICLE = {
@@ -47,6 +48,7 @@ async function seedStudent() {
       schoolCode: parsedIdentity.schoolCode,
       majorCode: parsedIdentity.majorCode,
       classSerial: parsedIdentity.classSerial,
+      passwordHash: hashPassword(DEV_STUDENT.password),
       emailVerifiedAt: new Date(),
       lastLoginAt: null,
     })
@@ -59,6 +61,7 @@ async function seedStudent() {
         schoolCode: parsedIdentity.schoolCode,
         majorCode: parsedIdentity.majorCode,
         classSerial: parsedIdentity.classSerial,
+        passwordHash: hashPassword(DEV_STUDENT.password),
         emailVerifiedAt: new Date(),
         status: 'active',
         updatedAt: new Date(),
@@ -141,6 +144,7 @@ async function main() {
   console.log(`- studentNo: ${student.studentNo}`);
   console.log(`- name: ${student.name}`);
   console.log(`- campusEmail: ${student.campusEmail}`);
+  console.log(`- password: ${DEV_STUDENT.password}`);
   console.log('');
   console.log('Default article');
   console.log(`- article: ${article.title}`);

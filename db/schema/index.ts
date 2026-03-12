@@ -10,6 +10,7 @@ const adminStatusValues = ['active', 'inactive'] as const;
 const studentStatusValues = ['active', 'inactive'] as const;
 const attemptStatusValues = ['started', 'submitted', 'expired', 'cancelled', 'invalidated'] as const;
 const sessionUserTypeValues = ['student', 'admin'] as const;
+const authAttemptScopeValues = ['student_login', 'admin_login'] as const;
 
 const timestamps = () => ({
   createdAt: integer('created_at', { mode: 'timestamp_ms' })
@@ -32,6 +33,7 @@ export const students = sqliteTable(
     schoolCode: text('school_code').notNull(),
     majorCode: text('major_code').notNull(),
     classSerial: text('class_serial').notNull(),
+    passwordHash: text('password_hash'),
     status: text('status', { enum: studentStatusValues }).notNull().default('active'),
     emailVerifiedAt: integer('email_verified_at', { mode: 'timestamp_ms' }),
     lastLoginAt: integer('last_login_at', { mode: 'timestamp_ms' }),
@@ -48,6 +50,55 @@ export const students = sqliteTable(
     check(
       'students_campus_email_ucass_check',
       sql`lower(${table.campusEmail}) like '%@ucass.edu.cn'`,
+    ),
+  ],
+);
+
+export const studentEmailVerificationTokens = sqliteTable(
+  'student_email_verification_tokens',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    studentId: integer('student_id')
+      .notNull()
+      .references(() => students.id, { onDelete: 'cascade', onUpdate: 'cascade' }),
+    tokenHash: text('token_hash').notNull(),
+    expiresAt: integer('expires_at', { mode: 'timestamp_ms' }).notNull(),
+    consumedAt: integer('consumed_at', { mode: 'timestamp_ms' }),
+    requestIp: text('request_ip'),
+    requestUserAgent: text('request_user_agent'),
+    createdAt: integer('created_at', { mode: 'timestamp_ms' })
+      .notNull()
+      .$defaultFn(() => new Date()),
+  },
+  (table) => [
+    uniqueIndex('student_email_verification_tokens_token_hash_unique').on(table.tokenHash),
+    index('student_email_verification_tokens_student_idx').on(table.studentId),
+    index('student_email_verification_tokens_expires_at_idx').on(table.expiresAt),
+  ],
+);
+
+export const authLoginAttempts = sqliteTable(
+  'auth_login_attempts',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    scope: text('scope', { enum: authAttemptScopeValues }).notNull(),
+    identifier: text('identifier').notNull(),
+    ipAddress: text('ip_address'),
+    wasSuccessful: integer('was_successful', { mode: 'boolean' }).notNull().default(false),
+    createdAt: integer('created_at', { mode: 'timestamp_ms' })
+      .notNull()
+      .$defaultFn(() => new Date()),
+  },
+  (table) => [
+    index('auth_login_attempts_scope_identifier_created_at_idx').on(
+      table.scope,
+      table.identifier,
+      table.createdAt,
+    ),
+    index('auth_login_attempts_scope_ip_created_at_idx').on(
+      table.scope,
+      table.ipAddress,
+      table.createdAt,
     ),
   ],
 );
@@ -180,6 +231,7 @@ export const sessions = sqliteTable(
 
 export const studentsRelations = relations(students, ({ many }) => ({
   attempts: many(attempts),
+  emailVerificationTokens: many(studentEmailVerificationTokens),
 }));
 
 export const articlesRelations = relations(articles, ({ many }) => ({
@@ -197,8 +249,19 @@ export const attemptsRelations = relations(attempts, ({ one }) => ({
   }),
 }));
 
+export const studentEmailVerificationTokensRelations = relations(studentEmailVerificationTokens, ({ one }) => ({
+  student: one(students, {
+    fields: [studentEmailVerificationTokens.studentId],
+    references: [students.id],
+  }),
+}));
+
 export type Student = typeof students.$inferSelect;
 export type NewStudent = typeof students.$inferInsert;
+export type StudentEmailVerificationToken = typeof studentEmailVerificationTokens.$inferSelect;
+export type NewStudentEmailVerificationToken = typeof studentEmailVerificationTokens.$inferInsert;
+export type AuthLoginAttempt = typeof authLoginAttempts.$inferSelect;
+export type NewAuthLoginAttempt = typeof authLoginAttempts.$inferInsert;
 export type AdminUser = typeof adminUsers.$inferSelect;
 export type NewAdminUser = typeof adminUsers.$inferInsert;
 export type Article = typeof articles.$inferSelect;
