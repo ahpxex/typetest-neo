@@ -1,16 +1,18 @@
 import { createHash, randomBytes } from 'node:crypto';
 
 import { and, eq, gt } from 'drizzle-orm';
-import { cookies } from 'next/headers';
+import { cookies, headers } from 'next/headers';
 
 import { db, ensureDatabaseReady } from '@/db/client';
 import { adminUsers, sessions, students } from '@/db/schema';
 import {
   ADMIN_SESSION_COOKIE,
+  APP_BASE_URL,
   SESSION_DURATION_DAYS,
   STUDENT_SESSION_COOKIE,
   isDevelopment,
 } from '@/lib/env';
+import { inferSecureCookie } from '@/lib/auth/cookie-security';
 
 export type SessionUserType = 'student' | 'admin';
 
@@ -34,13 +36,27 @@ function getSessionExpiresAt() {
   return new Date(Date.now() + SESSION_DURATION_DAYS * 24 * 60 * 60 * 1000);
 }
 
+async function shouldUseSecureCookies() {
+  const headerStore = await headers();
+
+  return inferSecureCookie({
+    appBaseUrl: APP_BASE_URL,
+    forwarded: headerStore.get('forwarded'),
+    forwardedProto: headerStore.get('x-forwarded-proto'),
+    isDevelopment,
+    origin: headerStore.get('origin'),
+    referer: headerStore.get('referer'),
+  });
+}
+
 async function setSessionCookie(userType: SessionUserType, token: string, expiresAt: Date) {
   const cookieStore = await cookies();
+  const secure = await shouldUseSecureCookies();
 
   cookieStore.set(getCookieName(userType), token, {
     httpOnly: true,
     sameSite: 'lax',
-    secure: !isDevelopment,
+    secure,
     path: '/',
     expires: expiresAt,
   });
