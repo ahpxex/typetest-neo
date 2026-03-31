@@ -53,15 +53,15 @@ async function main() {
     }
 
     const role = await input({
-      message: '请选择角色 (admin/superadmin):',
+      message: '请选择角色 (admin/teacher):',
       default: 'admin',
       validate: (value) => {
-        if (!['admin', 'superadmin'].includes(value)) {
-          return '角色必须是 admin 或 superadmin';
+        if (!['admin', 'teacher'].includes(value)) {
+          return '角色必须是 admin 或 teacher';
         }
         return true;
       },
-    }) as 'admin' | 'superadmin';
+    }) as 'admin' | 'teacher';
 
     // 检查用户名是否已存在
     const existing = await db
