@@ -13,7 +13,8 @@
     "db:studio": "drizzle-kit studio",
     "db:seed:dev": "bun run db/seeds/dev.ts",
     "db:seed:mock": "bun run db/seeds/mock.ts",
-    "db:import:legacy-articles": "bun run scripts/import-legacy-articles.ts"
+    "db:import:legacy-articles": "bun run scripts/import-legacy-articles.ts",
+    "add:admin": "bun run scripts/add-admin.ts"
   },
   "dependencies": {
     "@libsql/client": "^0.17.0",
@@ -31,6 +32,7 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@inquirer/prompts": "^8.3.2",
     "@react-grab/codex": "^0.1.25",
     "@tailwindcss/postcss": "^4",
     "@types/bun": "^1.3.10",
