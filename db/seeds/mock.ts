@@ -112,7 +112,7 @@ async function getPublishedArticles() {
     .orderBy(asc(articles.slug));
 
   if (publishedArticles.length === 0) {
-    throw new Error('No published articles found. Run the dev/article seed first.');
+    throw new Error('No published articles found. Run `bun run db:push` or `bun run db:sync:articles` first.');
   }
 
   return publishedArticles;

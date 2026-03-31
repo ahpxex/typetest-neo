@@ -9,12 +9,12 @@
     "lint": "eslint",
     "test": "bun test",
     "db:generate": "drizzle-kit generate",
-    "db:migrate": "drizzle-kit migrate",
-    "db:push": "drizzle-kit push",
+    "db:migrate": "drizzle-kit migrate && bun run db:sync:articles",
+    "db:push": "drizzle-kit push && bun run db:sync:articles",
+    "db:sync:articles": "bun run scripts/sync-articles.ts",
     "db:studio": "drizzle-kit studio",
     "db:seed:dev": "bun run db/seeds/dev.ts",
     "db:seed:mock": "bun run db/seeds/mock.ts",
-    "db:import:legacy-articles": "bun run scripts/import-legacy-articles.ts",
     "add:admin": "bun run scripts/add-admin.ts"
   },
   "dependencies": {
