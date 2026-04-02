@@ -3,118 +3,15 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 
-import { calculateStrictAccuracy, calculateTypingMetricsPrepared, normalizeTypingText } from '@/modules/typing-engine';
+import { calculateTypingMetricsPrepared, normalizeTypingText } from '@/modules/typing-engine';
 import { isDevelopment } from '@/lib/env';
 import { ESTIMATED_GLYPH_WIDTH, TEXT_VIEWPORT_MAX_WIDTH, VISIBLE_LINE_COUNT, buildVisibleLines, getCurrentLineIndex } from '@/components/typing/line-layout';
 import { TypingStatsBar } from '@/components/typing/typing-stats-bar';
 import { TypingViewport } from '@/components/typing/typing-viewport';
 import type { TypingTestClientProps } from '@/components/typing/types';
 
-type HistoricalAccuracyStats = {
-  inputCharCount: number;
-  mistypedCharCount: number;
-};
-
-const EMPTY_HISTORICAL_ACCURACY_STATS: HistoricalAccuracyStats = {
-  inputCharCount: 0,
-  mistypedCharCount: 0,
-};
-
 function getTypingTextStorageKey(attemptId: number) {
   return `typing-attempt-${attemptId}`;
-}
-
-function getTypingStatsStorageKey(attemptId: number) {
-  return `typing-attempt-stats-${attemptId}`;
-}
-
-function countSnapshotMistakes(referenceText: string, typedText: string) {
-  const referenceChars = Array.from(referenceText);
-  const typedChars = Array.from(typedText);
-  let mistakeCount = 0;
-
-  for (let index = 0; index < typedChars.length; index += 1) {
-    if (typedChars[index] !== referenceChars[index]) {
-      mistakeCount += 1;
-    }
-  }
-
-  return mistakeCount;
-}
-
-function parseHistoricalAccuracyStats(value: string | null) {
-  if (!value) {
-    return null;
-  }
-
-  try {
-    const parsed = JSON.parse(value) as Partial<HistoricalAccuracyStats>;
-    const inputCharCount = Number.isFinite(parsed.inputCharCount)
-      ? Math.max(0, Math.floor(parsed.inputCharCount ?? 0))
-      : 0;
-    const mistypedCharCount = Number.isFinite(parsed.mistypedCharCount)
-      ? Math.max(0, Math.floor(parsed.mistypedCharCount ?? 0))
-      : 0;
-
-    return {
-      inputCharCount,
-      mistypedCharCount,
-    } satisfies HistoricalAccuracyStats;
-  } catch {
-    return null;
-  }
-}
-
-function getInsertedCharacterDelta(
-  previousValue: string,
-  nextValue: string,
-  referenceChars: string[],
-): HistoricalAccuracyStats {
-  if (previousValue === nextValue) {
-    return EMPTY_HISTORICAL_ACCURACY_STATS;
-  }
-
-  const previousChars = Array.from(previousValue);
-  const nextChars = Array.from(nextValue);
-  const sharedLength = Math.min(previousChars.length, nextChars.length);
-
-  let start = 0;
-  while (start < sharedLength && previousChars[start] === nextChars[start]) {
-    start += 1;
-  }
-
-  let previousEnd = previousChars.length - 1;
-  let nextEnd = nextChars.length - 1;
-
-  while (
-    previousEnd >= start
-    && nextEnd >= start
-    && previousChars[previousEnd] === nextChars[nextEnd]
-  ) {
-    previousEnd -= 1;
-    nextEnd -= 1;
-  }
-
-  const insertedChars = nextChars.slice(start, nextEnd + 1);
-
-  if (insertedChars.length === 0) {
-    return EMPTY_HISTORICAL_ACCURACY_STATS;
-  }
-
-  let mistypedCharCount = 0;
-
-  for (let offset = 0; offset < insertedChars.length; offset += 1) {
-    const expectedChar = referenceChars[start + offset];
-
-    if (insertedChars[offset] !== expectedChar) {
-      mistypedCharCount += 1;
-    }
-  }
-
-  return {
-    inputCharCount: insertedChars.length,
-    mistypedCharCount,
-  };
 }
 
 export function TypingTestClient({
@@ -132,11 +29,9 @@ export function TypingTestClient({
   const saveTimerRef = useRef<number | null>(null);
   const frameRef = useRef<number | null>(null);
   const typedTextRef = useRef('');
-  const historicalAccuracyStatsRef = useRef<HistoricalAccuracyStats>(EMPTY_HISTORICAL_ACCURACY_STATS);
   const initialTypedLengthRef = useRef(0);
   const hasTypedSinceMountRef = useRef(false);
   const [renderedText, setRenderedText] = useState('');
-  const [historicalAccuracyStats, setHistoricalAccuracyStats] = useState<HistoricalAccuracyStats>(EMPTY_HISTORICAL_ACCURACY_STATS);
   const [backspaceCount, setBackspaceCount] = useState(0);
   const [nowMs, setNowMs] = useState(Date.now());
   const [error, setError] = useState<string | null>(null);
@@ -163,24 +58,16 @@ export function TypingTestClient({
 
   useEffect(() => {
     const storageKey = getTypingTextStorageKey(attemptId);
-    const statsKey = getTypingStatsStorageKey(attemptId);
     const savedText = window.localStorage.getItem(storageKey) ?? '';
-    const savedStats = parseHistoricalAccuracyStats(window.localStorage.getItem(statsKey));
-    const fallbackStats = {
-      inputCharCount: Array.from(savedText).length,
-      mistypedCharCount: countSnapshotMistakes(referenceText, savedText),
-    } satisfies HistoricalAccuracyStats;
-    const nextHistoricalAccuracyStats = savedStats ?? fallbackStats;
 
     typedTextRef.current = savedText;
-    historicalAccuracyStatsRef.current = nextHistoricalAccuracyStats;
     initialTypedLengthRef.current = Array.from(savedText).length;
     hasTypedSinceMountRef.current = false;
     setRenderedText(savedText);
-    setHistoricalAccuracyStats(nextHistoricalAccuracyStats);
     setBackspaceCount(0);
     setError(null);
     setSubmitting(false);
+    window.localStorage.removeItem(`typing-attempt-stats-${attemptId}`);
 
     if (hiddenInputRef.current) {
       hiddenInputRef.current.value = savedText;
@@ -189,7 +76,6 @@ export function TypingTestClient({
 
   useEffect(() => {
     const storageKey = getTypingTextStorageKey(attemptId);
-    const statsKey = getTypingStatsStorageKey(attemptId);
 
     if (saveTimerRef.current) {
       window.clearTimeout(saveTimerRef.current);
@@ -197,7 +83,6 @@ export function TypingTestClient({
 
     saveTimerRef.current = window.setTimeout(() => {
       window.localStorage.setItem(storageKey, typedTextRef.current);
-      window.localStorage.setItem(statsKey, JSON.stringify(historicalAccuracyStatsRef.current));
     }, 250);
 
     return () => {
@@ -205,7 +90,7 @@ export function TypingTestClient({
         window.clearTimeout(saveTimerRef.current);
       }
     };
-  }, [attemptId, historicalAccuracyStats.inputCharCount, historicalAccuracyStats.mistypedCharCount, renderedText]);
+  }, [attemptId, renderedText]);
 
   useEffect(() => {
     hiddenInputRef.current?.focus();
@@ -318,7 +203,7 @@ export function TypingTestClient({
   const liveScoreKpm = !hasTypedSinceMountRef.current || elapsedMilliseconds <= 0
     ? 0
     : Math.round((liveTypedCount / stabilizedDurationMs) * 60000);
-  const liveAccuracy = calculateStrictAccuracy(historicalAccuracyStats);
+  const liveAccuracy = metrics.accuracy;
 
   const submitAttempt = useCallback(async () => {
     if (submitLockRef.current) {
@@ -339,8 +224,6 @@ export function TypingTestClient({
           typedTextRaw: typedTextRef.current,
           durationSecondsUsed: elapsedSeconds,
           backspaceCount,
-          inputCharCount: historicalAccuracyStatsRef.current.inputCharCount,
-          mistypedCharCount: historicalAccuracyStatsRef.current.mistypedCharCount,
           clientMeta: {
             userAgent: navigator.userAgent,
             language: navigator.language,
@@ -359,7 +242,7 @@ export function TypingTestClient({
       }
 
       window.localStorage.removeItem(getTypingTextStorageKey(attemptId));
-      window.localStorage.removeItem(getTypingStatsStorageKey(attemptId));
+      window.localStorage.removeItem(`typing-attempt-stats-${attemptId}`);
       router.push(payload.redirectTo);
       router.refresh();
     } catch (submitError) {
@@ -405,17 +288,7 @@ export function TypingTestClient({
   }, [isDevTimerPaused]);
 
   const handleInputValue = useCallback((value: string) => {
-    const previousValue = typedTextRef.current;
-    const historicalAccuracyDelta = getInsertedCharacterDelta(previousValue, value, referenceChars);
-
     typedTextRef.current = value;
-
-    if (historicalAccuracyDelta.inputCharCount > 0) {
-      historicalAccuracyStatsRef.current = {
-        inputCharCount: historicalAccuracyStatsRef.current.inputCharCount + historicalAccuracyDelta.inputCharCount,
-        mistypedCharCount: historicalAccuracyStatsRef.current.mistypedCharCount + historicalAccuracyDelta.mistypedCharCount,
-      };
-    }
 
     const currentLength = Array.from(value).length;
 
@@ -434,9 +307,8 @@ export function TypingTestClient({
     frameRef.current = window.requestAnimationFrame(() => {
       frameRef.current = null;
       setRenderedText(typedTextRef.current);
-      setHistoricalAccuracyStats(historicalAccuracyStatsRef.current);
     });
-  }, [referenceChars]);
+  }, []);
 
   return (
     <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden pb-24 md:pb-28">

@@ -273,8 +273,6 @@ async function run() {
           body: JSON.stringify({
             typedTextRaw: attempt.contentRaw,
             backspaceCount: 0,
-            inputCharCount: Array.from(attempt.contentRaw).length,
-            mistypedCharCount: 0,
             clientMeta: {
               source: 'load-submit-script',
             },
