@@ -1,0 +1,2 @@
+CREATE INDEX `attempts_student_exam_submitted_ranking_idx` ON `attempts` (`student_id`,`mode`,`status`,"score_kpm" desc,"accuracy" desc,`submitted_at`);--> statement-breakpoint
+CREATE INDEX `students_recent_order_idx` ON `students` ("created_at" desc,`student_no`);

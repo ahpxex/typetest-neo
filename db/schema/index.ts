@@ -48,6 +48,7 @@ export const students = sqliteTable(
     index('students_school_code_idx').on(table.schoolCode),
     index('students_major_code_idx').on(table.majorCode),
     index('students_created_at_student_no_idx').on(table.createdAt, table.studentNo),
+    index('students_recent_order_idx').on(sql`${table.createdAt} desc`, table.studentNo),
     check(
       'students_campus_email_ucass_check',
       sql`lower(${table.campusEmail}) like '%@ucass.edu.cn'`,
@@ -220,6 +221,14 @@ export const attempts = sqliteTable(
       table.createdAt,
     ),
     index('attempts_leaderboard_idx').on(
+      table.mode,
+      table.status,
+      sql`${table.scoreKpm} desc`,
+      sql`${table.accuracy} desc`,
+      table.submittedAt,
+    ),
+    index('attempts_student_exam_submitted_ranking_idx').on(
+      table.studentId,
       table.mode,
       table.status,
       sql`${table.scoreKpm} desc`,

@@ -325,71 +325,104 @@ export async function getAdminStudentsPage({
     };
   }
 
-  const attemptRows = await withDatabaseRetry('getAdminStudentsPage.attempts', async () => (
+  const studentIds = studentRows.map((student) => student.id);
+
+  const attemptCountRows = await withDatabaseRetry('getAdminStudentsPage.attemptCounts', async () => (
     db
       .select({
         studentId: attempts.studentId,
-        mode: attempts.mode,
-        status: attempts.status,
-        scoreKpm: attempts.scoreKpm,
-        accuracy: attempts.accuracy,
-        submittedAt: attempts.submittedAt,
+        submittedAttemptCount: sql<number>`
+          cast(sum(case
+            when ${attempts.mode} = 'exam' and ${attempts.status} = 'submitted' then 1
+            else 0
+          end) as int)
+        `.as('submitted_attempt_count'),
+        practiceAttemptCount: sql<number>`
+          cast(sum(case
+            when ${attempts.mode} = 'practice' then 1
+            else 0
+          end) as int)
+        `.as('practice_attempt_count'),
+        examAttemptCount: sql<number>`
+          cast(sum(case
+            when ${attempts.mode} = 'exam' then 1
+            else 0
+          end) as int)
+        `.as('exam_attempt_count'),
+        totalAttemptCount: sql<number>`cast(count(*) as int)`.as('total_attempt_count'),
       })
       .from(attempts)
-      .where(inArray(attempts.studentId, studentRows.map((student) => student.id)))
-      .orderBy(desc(attempts.createdAt), desc(attempts.attemptNo))
+      .where(inArray(attempts.studentId, studentIds))
+      .groupBy(attempts.studentId)
+  ));
+
+  const rankedBestSubmittedExamAttempts = db.$with('ranked_best_submitted_exam_attempts').as(
+    db
+      .select({
+        studentId: attempts.studentId,
+        scoreKpm: attempts.scoreKpm,
+        accuracy: attempts.accuracy,
+        studentRank: sql<number>`
+          row_number() over (
+            partition by ${attempts.studentId}
+            order by ${attempts.scoreKpm} desc, ${attempts.accuracy} desc, ${attempts.submittedAt} asc
+          )
+        `.as('student_rank'),
+      })
+      .from(attempts)
+      .where(and(
+        inArray(attempts.studentId, studentIds),
+        eq(attempts.mode, 'exam'),
+        eq(attempts.status, 'submitted'),
+      )),
+  );
+
+  const bestSubmittedRows = await withDatabaseRetry('getAdminStudentsPage.bestSubmittedRows', async () => (
+    db
+      .with(rankedBestSubmittedExamAttempts)
+      .select({
+        studentId: rankedBestSubmittedExamAttempts.studentId,
+        bestSubmittedScoreKpm: rankedBestSubmittedExamAttempts.scoreKpm,
+        bestSubmittedAccuracy: rankedBestSubmittedExamAttempts.accuracy,
+      })
+      .from(rankedBestSubmittedExamAttempts)
+      .where(eq(rankedBestSubmittedExamAttempts.studentRank, 1))
   ));
 
   const statsByStudent = new Map<number, {
     bestSubmittedScoreKpm: number | null;
-      bestSubmittedAccuracy: number | null;
-      bestSubmittedAt: number | null;
-      submittedAttemptCount: number;
-      practiceAttemptCount: number;
-      examAttemptCount: number;
-      totalAttemptCount: number;
+    bestSubmittedAccuracy: number | null;
+    submittedAttemptCount: number;
+    practiceAttemptCount: number;
+    examAttemptCount: number;
+    totalAttemptCount: number;
   }>();
 
-  for (const attempt of attemptRows) {
-    const current = statsByStudent.get(attempt.studentId) ?? {
+  for (const row of attemptCountRows) {
+    statsByStudent.set(row.studentId, {
       bestSubmittedScoreKpm: null,
       bestSubmittedAccuracy: null,
-      bestSubmittedAt: null,
+      submittedAttemptCount: row.submittedAttemptCount ?? 0,
+      practiceAttemptCount: row.practiceAttemptCount ?? 0,
+      examAttemptCount: row.examAttemptCount ?? 0,
+      totalAttemptCount: row.totalAttemptCount ?? 0,
+    });
+  }
+
+  for (const row of bestSubmittedRows) {
+    const current = statsByStudent.get(row.studentId) ?? {
+      bestSubmittedScoreKpm: null,
+      bestSubmittedAccuracy: null,
       submittedAttemptCount: 0,
       practiceAttemptCount: 0,
       examAttemptCount: 0,
       totalAttemptCount: 0,
     };
 
-    current.totalAttemptCount += 1;
+    current.bestSubmittedScoreKpm = row.bestSubmittedScoreKpm;
+    current.bestSubmittedAccuracy = row.bestSubmittedAccuracy;
 
-    if (attempt.mode === 'practice') {
-      current.practiceAttemptCount += 1;
-    } else {
-      current.examAttemptCount += 1;
-    }
-
-    if (attempt.status === 'submitted' && attempt.mode === 'exam') {
-      current.submittedAttemptCount += 1;
-      const submittedAtMs = attempt.submittedAt?.getTime() ?? 0;
-      const shouldReplace =
-        current.bestSubmittedScoreKpm === null
-        || attempt.scoreKpm > current.bestSubmittedScoreKpm
-        || (attempt.scoreKpm === current.bestSubmittedScoreKpm
-          && (attempt.accuracy > (current.bestSubmittedAccuracy ?? 0)
-            || (
-              attempt.accuracy === (current.bestSubmittedAccuracy ?? 0)
-              && submittedAtMs < (current.bestSubmittedAt ?? Number.POSITIVE_INFINITY)
-            )));
-
-      if (shouldReplace) {
-        current.bestSubmittedScoreKpm = attempt.scoreKpm;
-        current.bestSubmittedAccuracy = attempt.accuracy;
-        current.bestSubmittedAt = submittedAtMs;
-      }
-    }
-
-    statsByStudent.set(attempt.studentId, current);
+    statsByStudent.set(row.studentId, current);
   }
 
   return {
@@ -794,7 +827,7 @@ export async function getAttemptDetail(attemptId: number) {
 }
 
 export async function getLeaderboard(): Promise<LeaderboardEntry[]> {
-  const rows = await withDatabaseRetry('getLeaderboard', async () => (
+  const rankedLeaderboardAttempts = db.$with('ranked_leaderboard_attempts').as(
     db
       .select({
         attemptId: attempts.id,
@@ -807,48 +840,42 @@ export async function getLeaderboard(): Promise<LeaderboardEntry[]> {
         accuracy: attempts.accuracy,
         submittedAt: attempts.submittedAt,
         attemptNo: attempts.attemptNo,
+        studentRank: sql<number>`
+          row_number() over (
+            partition by ${attempts.studentId}
+            order by ${attempts.scoreKpm} desc, ${attempts.accuracy} desc, ${attempts.submittedAt} asc
+          )
+        `.as('student_rank'),
       })
       .from(attempts)
-      .where(and(eq(attempts.status, 'submitted'), eq(attempts.mode, 'exam')))
-      .orderBy(desc(attempts.scoreKpm), desc(attempts.accuracy), asc(attempts.submittedAt))
+      .where(and(eq(attempts.status, 'submitted'), eq(attempts.mode, 'exam'))),
+  );
+
+  const rows = await withDatabaseRetry('getLeaderboard', async () => (
+    db
+      .with(rankedLeaderboardAttempts)
+      .select({
+        attemptId: rankedLeaderboardAttempts.attemptId,
+        studentId: rankedLeaderboardAttempts.studentId,
+        studentNo: rankedLeaderboardAttempts.studentNo,
+        name: rankedLeaderboardAttempts.studentName,
+        campusEmail: rankedLeaderboardAttempts.campusEmail,
+        mode: rankedLeaderboardAttempts.mode,
+        scoreKpm: rankedLeaderboardAttempts.scoreKpm,
+        accuracy: rankedLeaderboardAttempts.accuracy,
+        submittedAt: rankedLeaderboardAttempts.submittedAt,
+        attemptNo: rankedLeaderboardAttempts.attemptNo,
+      })
+      .from(rankedLeaderboardAttempts)
+      .where(eq(rankedLeaderboardAttempts.studentRank, 1))
+      .orderBy(
+        desc(rankedLeaderboardAttempts.scoreKpm),
+        desc(rankedLeaderboardAttempts.accuracy),
+        asc(rankedLeaderboardAttempts.submittedAt),
+      )
   ));
 
-  const bestByStudent = new Map<number, LeaderboardEntry>();
-
-  for (const row of rows) {
-    const existing = bestByStudent.get(row.studentId);
-    const candidate: LeaderboardEntry = {
-      rank: 0,
-      studentId: row.studentId,
-      studentNo: row.studentNo,
-      name: row.studentName,
-      campusEmail: row.campusEmail,
-      attemptId: row.attemptId,
-      mode: row.mode,
-      scoreKpm: row.scoreKpm,
-      accuracy: row.accuracy,
-      submittedAt: row.submittedAt,
-      attemptNo: row.attemptNo,
-    };
-
-    if (!existing) {
-      bestByStudent.set(row.studentId, candidate);
-      continue;
-    }
-
-    const shouldReplace =
-      candidate.scoreKpm > existing.scoreKpm ||
-      (candidate.scoreKpm === existing.scoreKpm && candidate.accuracy > existing.accuracy) ||
-      (candidate.scoreKpm === existing.scoreKpm &&
-        candidate.accuracy === existing.accuracy &&
-        (candidate.submittedAt?.getTime() ?? 0) < (existing.submittedAt?.getTime() ?? 0));
-
-    if (shouldReplace) {
-      bestByStudent.set(row.studentId, candidate);
-    }
-  }
-
-  return Array.from(bestByStudent.values())
+  return rows
     .sort((left, right) => {
       if (right.scoreKpm !== left.scoreKpm) {
         return right.scoreKpm - left.scoreKpm;
