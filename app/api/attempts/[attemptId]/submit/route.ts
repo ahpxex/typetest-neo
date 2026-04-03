@@ -10,6 +10,9 @@ import { getAttemptDetail } from '@/lib/data/queries';
 import { calculateTypingMetrics, normalizeTypingText } from '@/modules/typing-engine';
 
 const MAX_SUBMIT_PAYLOAD_BYTES = 64 * 1024;
+const noStoreHeaders = {
+  'Cache-Control': 'private, no-store',
+};
 const submitAttemptSchema = z.object({
   typedTextRaw: z.string().default(''),
   backspaceCount: z.number().int().min(0).max(100_000).default(0),
@@ -33,18 +36,18 @@ export async function POST(
     origin: request.headers.get('origin'),
     referer: request.headers.get('referer'),
   })) {
-    return NextResponse.json({ error: 'forbidden_origin' }, { status: 403 });
+    return NextResponse.json({ error: 'forbidden_origin' }, { status: 403, headers: noStoreHeaders });
   }
 
   const contentLength = Number(request.headers.get('content-length') ?? '0');
   if (Number.isFinite(contentLength) && contentLength > MAX_SUBMIT_PAYLOAD_BYTES) {
-    return NextResponse.json({ error: '提交内容过大。' }, { status: 413 });
+    return NextResponse.json({ error: '提交内容过大。' }, { status: 413, headers: noStoreHeaders });
   }
 
   const currentStudent = await getCurrentStudent();
 
   if (!currentStudent) {
-    return NextResponse.json({ error: '未登录或登录已失效。' }, { status: 401 });
+    return NextResponse.json({ error: '未登录或登录已失效。' }, { status: 401, headers: noStoreHeaders });
   }
 
   const { attemptId } = await params;
@@ -52,18 +55,18 @@ export async function POST(
   const attempt = await getAttemptDetail(id);
 
   if (!attempt || attempt.studentId !== currentStudent.student.id) {
-    return NextResponse.json({ error: '未找到可提交的测试记录。' }, { status: 404 });
+    return NextResponse.json({ error: '未找到可提交的测试记录。' }, { status: 404, headers: noStoreHeaders });
   }
 
   if (attempt.status !== 'started') {
-    return NextResponse.json({ redirectTo: `/result/${id}` });
+    return NextResponse.json({ redirectTo: `/result/${id}` }, { headers: noStoreHeaders });
   }
 
   const payloadJson = await request.json().catch(() => null);
   const parsedPayload = submitAttemptSchema.safeParse(payloadJson);
 
   if (!parsedPayload.success) {
-    return NextResponse.json({ error: '提交内容无效。' }, { status: 400 });
+    return NextResponse.json({ error: '提交内容无效。' }, { status: 400, headers: noStoreHeaders });
   }
 
   const maxTypedTextLength = Math.min(
@@ -71,7 +74,7 @@ export async function POST(
     Math.max((attempt.articleContent?.length ?? 0) * 4, 4_000),
   );
   if (parsedPayload.data.typedTextRaw.length > maxTypedTextLength) {
-    return NextResponse.json({ error: '提交内容过长。' }, { status: 400 });
+    return NextResponse.json({ error: '提交内容过长。' }, { status: 400, headers: noStoreHeaders });
   }
 
   const submittedAt = new Date();
@@ -121,8 +124,8 @@ export async function POST(
   ));
 
   if (updateResult.rowsAffected === 0) {
-    return NextResponse.json({ redirectTo: `/result/${id}` });
+    return NextResponse.json({ redirectTo: `/result/${id}` }, { headers: noStoreHeaders });
   }
 
-  return NextResponse.json({ redirectTo: `/result/${id}` });
+  return NextResponse.json({ redirectTo: `/result/${id}` }, { headers: noStoreHeaders });
 }

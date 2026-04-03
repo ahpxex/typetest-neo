@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from 'node:crypto';
 
-import { and, eq, gt } from 'drizzle-orm';
+import { and, eq, gt, sql } from 'drizzle-orm';
 import { cookies, headers } from 'next/headers';
 
 import { db, withDatabaseRetry } from '@/db/client';
@@ -24,6 +24,9 @@ export type AppSession = {
   expiresAt: Date;
   tokenHash: string;
 };
+
+const SESSION_CLEANUP_INTERVAL_MS = 15 * 60 * 1000;
+let lastExpiredSessionCleanupAt = 0;
 
 function getCookieName(userType: SessionUserType) {
   return userType === 'admin' ? ADMIN_SESSION_COOKIE : STUDENT_SESSION_COOKIE;
@@ -84,7 +87,23 @@ async function revokeSessionRecord(tokenHash: string) {
   });
 }
 
+async function cleanupExpiredSessions() {
+  const now = Date.now();
+
+  if (now - lastExpiredSessionCleanupAt < SESSION_CLEANUP_INTERVAL_MS) {
+    return;
+  }
+
+  await withDatabaseRetry('cleanupExpiredSessions', async () => {
+    await db.delete(sessions).where(sql`${sessions.expiresAt} <= ${new Date(now)}`);
+  });
+
+  lastExpiredSessionCleanupAt = now;
+}
+
 export async function createSession(userType: SessionUserType, userId: number) {
+  await cleanupExpiredSessions();
+
   const token = randomBytes(24).toString('hex');
   const tokenHash = hashToken(token);
   const expiresAt = getSessionExpiresAt();
@@ -122,6 +141,8 @@ export async function revokeSessionsForUser(userType: SessionUserType, userId: n
 }
 
 export async function refreshSession(userType: SessionUserType) {
+  await cleanupExpiredSessions();
+
   const cookieStore = await cookies();
   const token = cookieStore.get(getCookieName(userType))?.value;
 

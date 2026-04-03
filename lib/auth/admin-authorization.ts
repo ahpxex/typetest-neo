@@ -7,3 +7,7 @@ export function canManageStudents(role: AdminUser['role']) {
 export function canExportAttempts(role: AdminUser['role']) {
   return role === 'admin';
 }
+
+export function canViewStudentAttempts(role: AdminUser['role']) {
+  return role === 'admin' || role === 'teacher';
+}

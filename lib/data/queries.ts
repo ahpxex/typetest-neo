@@ -82,19 +82,21 @@ function deterministicIndex(total: number, seed: string) {
 }
 
 async function getRotatingArticlePool(): Promise<RotatingArticle[]> {
-  const publishedArticles = await db
-    .select({
-      articleId: articles.id,
-      title: articles.title,
-      slug: articles.slug,
-      language: articles.language,
-      status: articles.status,
-      contentRaw: articles.contentRaw,
-      source: articles.source,
-    })
-    .from(articles)
-    .where(eq(articles.status, 'published'))
-    .orderBy(asc(articles.slug));
+  const publishedArticles = await withDatabaseRetry('getRotatingArticlePool', async () => (
+    db
+      .select({
+        articleId: articles.id,
+        title: articles.title,
+        slug: articles.slug,
+        language: articles.language,
+        status: articles.status,
+        contentRaw: articles.contentRaw,
+        source: articles.source,
+      })
+      .from(articles)
+      .where(eq(articles.status, 'published'))
+      .orderBy(asc(articles.slug))
+  ));
 
   const withoutDevSeed = publishedArticles.filter((article) => article.source !== 'seed:dev');
   return withoutDevSeed.length > 0 ? withoutDevSeed : publishedArticles;
@@ -241,14 +243,16 @@ function buildAdminStudentFilter({
 }
 
 export async function getAdminStudentFilterOptions(): Promise<AdminStudentFilterOptions> {
-  const rows = await db
-    .select({
-      enrollmentYear: students.enrollmentYear,
-      schoolCode: students.schoolCode,
-      majorCode: students.majorCode,
-    })
-    .from(students)
-    .orderBy(asc(students.enrollmentYear), asc(students.schoolCode), asc(students.majorCode));
+  const rows = await withDatabaseRetry('getAdminStudentFilterOptions', async () => (
+    db
+      .select({
+        enrollmentYear: students.enrollmentYear,
+        schoolCode: students.schoolCode,
+        majorCode: students.majorCode,
+      })
+      .from(students)
+      .orderBy(asc(students.enrollmentYear), asc(students.schoolCode), asc(students.majorCode))
+  ));
 
   return {
     enrollmentYears: Array.from(new Set(rows.map((row) => row.enrollmentYear))).filter(Boolean),
@@ -274,11 +278,13 @@ export async function getAdminStudentsPage({
 } = {}): Promise<AdminStudentsPage> {
   const filter = buildAdminStudentFilter({ search, enrollmentYear, schoolCode, majorCode });
 
-  const totalRow = await db
-    .select({ count: count() })
-    .from(students)
-    .where(filter)
-    .get();
+  const totalRow = await withDatabaseRetry('getAdminStudentsPage.total', async () => (
+    db
+      .select({ count: count() })
+      .from(students)
+      .where(filter)
+      .get()
+  ));
 
   const total = totalRow?.count ?? 0;
   const safePageSize = Math.max(1, Math.floor(pageSize));
@@ -286,26 +292,28 @@ export async function getAdminStudentsPage({
   const resolvedPage = Math.min(Math.max(1, Math.floor(page)), totalPages);
   const offset = (resolvedPage - 1) * safePageSize;
 
-  const studentRows = await db
-    .select({
-      id: students.id,
-      studentNo: students.studentNo,
-      name: students.name,
-      campusEmail: students.campusEmail,
-      enrollmentYear: students.enrollmentYear,
-      schoolCode: students.schoolCode,
-      majorCode: students.majorCode,
-      status: students.status,
-      notes: students.notes,
-      lastLoginAt: students.lastLoginAt,
-      createdAt: students.createdAt,
-      updatedAt: students.updatedAt,
-    })
-    .from(students)
-    .where(filter)
-    .orderBy(desc(students.createdAt), asc(students.studentNo))
-    .limit(safePageSize)
-    .offset(offset);
+  const studentRows = await withDatabaseRetry('getAdminStudentsPage.students', async () => (
+    db
+      .select({
+        id: students.id,
+        studentNo: students.studentNo,
+        name: students.name,
+        campusEmail: students.campusEmail,
+        enrollmentYear: students.enrollmentYear,
+        schoolCode: students.schoolCode,
+        majorCode: students.majorCode,
+        status: students.status,
+        notes: students.notes,
+        lastLoginAt: students.lastLoginAt,
+        createdAt: students.createdAt,
+        updatedAt: students.updatedAt,
+      })
+      .from(students)
+      .where(filter)
+      .orderBy(desc(students.createdAt), asc(students.studentNo))
+      .limit(safePageSize)
+      .offset(offset)
+  ));
 
   if (studentRows.length === 0) {
     return {
@@ -317,18 +325,20 @@ export async function getAdminStudentsPage({
     };
   }
 
-  const attemptRows = await db
-    .select({
-      studentId: attempts.studentId,
-      mode: attempts.mode,
-      status: attempts.status,
-      scoreKpm: attempts.scoreKpm,
-      accuracy: attempts.accuracy,
-      submittedAt: attempts.submittedAt,
-    })
-    .from(attempts)
-    .where(inArray(attempts.studentId, studentRows.map((student) => student.id)))
-    .orderBy(desc(attempts.createdAt), desc(attempts.attemptNo));
+  const attemptRows = await withDatabaseRetry('getAdminStudentsPage.attempts', async () => (
+    db
+      .select({
+        studentId: attempts.studentId,
+        mode: attempts.mode,
+        status: attempts.status,
+        scoreKpm: attempts.scoreKpm,
+        accuracy: attempts.accuracy,
+        submittedAt: attempts.submittedAt,
+      })
+      .from(attempts)
+      .where(inArray(attempts.studentId, studentRows.map((student) => student.id)))
+      .orderBy(desc(attempts.createdAt), desc(attempts.attemptNo))
+  ));
 
   const statsByStudent = new Map<number, {
     bestSubmittedScoreKpm: number | null;

@@ -47,6 +47,7 @@ export const students = sqliteTable(
     index('students_enrollment_year_idx').on(table.enrollmentYear),
     index('students_school_code_idx').on(table.schoolCode),
     index('students_major_code_idx').on(table.majorCode),
+    index('students_created_at_student_no_idx').on(table.createdAt, table.studentNo),
     check(
       'students_campus_email_ucass_check',
       sql`lower(${table.campusEmail}) like '%@ucass.edu.cn'`,

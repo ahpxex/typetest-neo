@@ -1,0 +1,1 @@
+CREATE INDEX `students_created_at_student_no_idx` ON `students` (`created_at`,`student_no`);

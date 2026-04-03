@@ -76,6 +76,7 @@ export async function GET() {
   return new NextResponse(body, {
     status: 200,
     headers: {
+      'Cache-Control': 'private, no-store',
       'Content-Type': 'text/csv; charset=utf-8',
       'Content-Disposition': 'attachment; filename="attempts-all.csv"',
     },

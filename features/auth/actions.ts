@@ -32,6 +32,8 @@ export type AuthFormState = {
 
 const EMAIL_VERIFICATION_IP_WINDOW_MINUTES = 15;
 const EMAIL_VERIFICATION_IP_WINDOW_MAX_REQUESTS = 8;
+const EMAIL_VERIFICATION_CLEANUP_INTERVAL_MS = 15 * 60 * 1000;
+let lastEmailVerificationCleanupAt = 0;
 
 const studentLoginSchema = z.object({
   campusEmail: z
@@ -74,6 +76,28 @@ function normalizeCampusEmail(campusEmail: string) {
 
 function normalizeAdminUsername(username: string) {
   return username.trim().toLowerCase();
+}
+
+async function cleanupVerificationTokens() {
+  const now = Date.now();
+
+  if (now - lastEmailVerificationCleanupAt < EMAIL_VERIFICATION_CLEANUP_INTERVAL_MS) {
+    return;
+  }
+
+  await withDatabaseRetry('cleanupVerificationTokens.expired', async () => {
+    await db
+      .delete(studentEmailVerificationTokens)
+      .where(sql`${studentEmailVerificationTokens.expiresAt} <= ${new Date(now)}`);
+  });
+
+  await withDatabaseRetry('cleanupVerificationTokens.consumed', async () => {
+    await db
+      .delete(studentEmailVerificationTokens)
+      .where(sql`${studentEmailVerificationTokens.consumedAt} is not null`);
+  });
+
+  lastEmailVerificationCleanupAt = now;
 }
 
 async function getRequestClientInfo() {
@@ -200,6 +224,8 @@ export async function studentRegisterAction(
   _prevState: AuthFormState,
   formData: FormData,
 ): Promise<AuthFormState> {
+  await cleanupVerificationTokens();
+
   const parsed = studentRegisterSchema.safeParse({
     studentNo: formData.get('studentNo'),
     name: formData.get('name'),
@@ -387,6 +413,8 @@ export async function studentRegisterAction(
 }
 
 export async function verifyStudentEmailAction(formData: FormData) {
+  await cleanupVerificationTokens();
+
   const parsed = verifyEmailSchema.safeParse({
     token: formData.get('token'),
   });

@@ -8,6 +8,10 @@ const refreshSessionSchema = z.object({
   userType: z.enum(['student', 'admin']),
 })
 
+const noStoreHeaders = {
+  'Cache-Control': 'private, no-store',
+}
+
 export async function POST(request: Request) {
   if (!isTrustedSameOriginRequest({
     host: request.headers.get('host'),
@@ -15,22 +19,22 @@ export async function POST(request: Request) {
     origin: request.headers.get('origin'),
     referer: request.headers.get('referer'),
   })) {
-    return NextResponse.json({ error: 'forbidden_origin' }, { status: 403 })
+    return NextResponse.json({ error: 'forbidden_origin' }, { status: 403, headers: noStoreHeaders })
   }
 
   const json = await request.json().catch(() => null)
   const parsed = refreshSessionSchema.safeParse(json)
 
   if (!parsed.success) {
-    return NextResponse.json({ error: 'invalid_session_refresh_request' }, { status: 400 })
+    return NextResponse.json({ error: 'invalid_session_refresh_request' }, { status: 400, headers: noStoreHeaders })
   }
 
   const refreshed = await refreshSession(parsed.data.userType)
 
   if (!refreshed) {
     await clearSession(parsed.data.userType)
-    return NextResponse.json({ error: 'session_expired' }, { status: 401 })
+    return NextResponse.json({ error: 'session_expired' }, { status: 401, headers: noStoreHeaders })
   }
 
-  return new NextResponse(null, { status: 204 })
+  return new NextResponse(null, { status: 204, headers: noStoreHeaders })
 }
