@@ -5,9 +5,10 @@ import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { z } from 'zod';
 
-import { db } from '@/db/client';
+import { db, withDatabaseRetry } from '@/db/client';
 import { studentEmailVerificationTokens, students } from '@/db/schema';
-import { revokeSessionsForUser } from '@/lib/auth/session';
+import { canManageStudents } from '@/lib/auth/admin-authorization';
+import { getCurrentAdmin, revokeSessionsForUser } from '@/lib/auth/session';
 import { isCampusEmailMatch, parseStudentIdentity } from '@/lib/student-identity';
 
 function getRedirectTarget(formData: FormData, fallback: string) {
@@ -19,6 +20,20 @@ function redirectWithNotice(path: string, key: 'success' | 'error', message: str
   const target = new URL(path, 'http://localhost');
   target.searchParams.set(key, message);
   redirect(`${target.pathname}${target.search}`);
+}
+
+async function requireStudentManagementAdmin(redirectTo: string) {
+  const currentAdmin = await getCurrentAdmin();
+
+  if (!currentAdmin) {
+    redirect('/admin/login');
+  }
+
+  if (!canManageStudents(currentAdmin.admin.role)) {
+    redirectWithNotice(redirectTo, 'error', '当前账号没有执行该管理操作的权限。');
+  }
+
+  return currentAdmin;
 }
 
 function buildStudentInsertPayload(data: z.infer<typeof studentSchema>) {
@@ -58,6 +73,7 @@ const studentSchema = z.object({
 
 export async function createStudentAction(formData: FormData) {
   const redirectTo = getRedirectTarget(formData, '/admin');
+  await requireStudentManagementAdmin(redirectTo);
   const parsed = studentSchema.safeParse({
     studentNo: formData.get('studentNo'),
     name: formData.get('name'),
@@ -76,22 +92,24 @@ export async function createStudentAction(formData: FormData) {
     redirectWithNotice(redirectTo, 'error', '学号或校园邮箱不合法');
   }
 
-  await db
-    .insert(students)
-    .values(payload)
-    .onConflictDoUpdate({
-      target: students.studentNo,
-      set: {
-        name: payload.name,
-        campusEmail: payload.campusEmail,
-        enrollmentYear: payload.enrollmentYear,
-        schoolCode: payload.schoolCode,
-        majorCode: payload.majorCode,
-        classSerial: payload.classSerial,
-        notes: payload.notes,
-        updatedAt: new Date(),
-      },
-    });
+  await withDatabaseRetry('createStudentAction.upsertStudent', async () => {
+    await db
+      .insert(students)
+      .values(payload)
+      .onConflictDoUpdate({
+        target: students.studentNo,
+        set: {
+          name: payload.name,
+          campusEmail: payload.campusEmail,
+          enrollmentYear: payload.enrollmentYear,
+          schoolCode: payload.schoolCode,
+          majorCode: payload.majorCode,
+          classSerial: payload.classSerial,
+          notes: payload.notes,
+          updatedAt: new Date(),
+        },
+      });
+  });
 
   revalidatePath('/admin');
   redirectWithNotice(redirectTo, 'success', '学生已保存');
@@ -99,6 +117,7 @@ export async function createStudentAction(formData: FormData) {
 
 export async function importStudentsCsvAction(formData: FormData) {
   const redirectTo = getRedirectTarget(formData, '/admin');
+  await requireStudentManagementAdmin(redirectTo);
   const csvText = String(formData.get('csvText') ?? '').trim();
 
   if (!csvText) {
@@ -137,22 +156,24 @@ export async function importStudentsCsvAction(formData: FormData) {
       redirectWithNotice(redirectTo, 'error', `导入失败：${line}`);
     }
 
-    await db
-      .insert(students)
-      .values(payload)
-      .onConflictDoUpdate({
-        target: students.studentNo,
-        set: {
-          name: payload.name,
-          campusEmail: payload.campusEmail,
-          enrollmentYear: payload.enrollmentYear,
-          schoolCode: payload.schoolCode,
-          majorCode: payload.majorCode,
-          classSerial: payload.classSerial,
-          notes: payload.notes,
-          updatedAt: new Date(),
-        },
-      });
+    await withDatabaseRetry('importStudentsCsvAction.upsertStudent', async () => {
+      await db
+        .insert(students)
+        .values(payload)
+        .onConflictDoUpdate({
+          target: students.studentNo,
+          set: {
+            name: payload.name,
+            campusEmail: payload.campusEmail,
+            enrollmentYear: payload.enrollmentYear,
+            schoolCode: payload.schoolCode,
+            majorCode: payload.majorCode,
+            classSerial: payload.classSerial,
+            notes: payload.notes,
+            updatedAt: new Date(),
+          },
+        });
+    });
   }
 
   revalidatePath('/admin');
@@ -161,30 +182,35 @@ export async function importStudentsCsvAction(formData: FormData) {
 
 export async function updateStudentStatusAction(formData: FormData) {
   const redirectTo = getRedirectTarget(formData, '/admin');
+  await requireStudentManagementAdmin(redirectTo);
   const studentId = z.coerce.number().int().positive().parse(formData.get('studentId'));
   const status = z.enum(['active', 'inactive']).parse(formData.get('status'));
   const now = new Date();
 
-  await db
-    .update(students)
-    .set({
-      status,
-      updatedAt: now,
-    })
-    .where(eq(students.id, studentId));
+  await withDatabaseRetry('updateStudentStatusAction.updateStudent', async () => {
+    await db
+      .update(students)
+      .set({
+        status,
+        updatedAt: now,
+      })
+      .where(eq(students.id, studentId));
+  });
 
   if (status === 'inactive') {
     await revokeSessionsForUser('student', studentId);
 
-    await db
-      .update(studentEmailVerificationTokens)
-      .set({ consumedAt: now })
-      .where(
-        and(
-          eq(studentEmailVerificationTokens.studentId, studentId),
-          isNull(studentEmailVerificationTokens.consumedAt),
-        ),
-      );
+    await withDatabaseRetry('updateStudentStatusAction.consumeVerificationTokens', async () => {
+      await db
+        .update(studentEmailVerificationTokens)
+        .set({ consumedAt: now })
+        .where(
+          and(
+            eq(studentEmailVerificationTokens.studentId, studentId),
+            isNull(studentEmailVerificationTokens.consumedAt),
+          ),
+        );
+    });
   }
 
   revalidatePath('/admin');

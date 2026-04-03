@@ -2,7 +2,7 @@ import 'server-only';
 
 import { and, eq, gte, lt, sql } from 'drizzle-orm';
 
-import { db } from '@/db/client';
+import { db, withDatabaseRetry } from '@/db/client';
 import { authLoginAttempts } from '@/db/schema';
 
 export type AuthLoginAttemptScope = 'student_login' | 'admin_login';
@@ -23,6 +23,7 @@ type RecordLoginAttemptInput = CheckLoginRateLimitInput & {
 };
 
 const LOGIN_RATE_LIMIT_RETENTION_DAYS = 30;
+const LOGIN_RATE_LIMIT_CLEANUP_INTERVAL_MS = 15 * 60 * 1000;
 
 const LOGIN_RATE_LIMITS: Record<AuthLoginAttemptScope, LoginRateLimitConfig> = {
   student_login: {
@@ -37,16 +38,28 @@ const LOGIN_RATE_LIMITS: Record<AuthLoginAttemptScope, LoginRateLimitConfig> = {
   },
 };
 
+let lastLoginAttemptCleanupAt = 0;
+
 function normalizeIdentifier(identifier: string) {
   return identifier.trim().toLowerCase();
 }
 
 async function cleanupExpiredLoginAttempts() {
+  const now = Date.now();
+
+  if (now - lastLoginAttemptCleanupAt < LOGIN_RATE_LIMIT_CLEANUP_INTERVAL_MS) {
+    return;
+  }
+
   const retentionStart = new Date(Date.now() - LOGIN_RATE_LIMIT_RETENTION_DAYS * 24 * 60 * 60 * 1000);
 
-  await db
-    .delete(authLoginAttempts)
-    .where(lt(authLoginAttempts.createdAt, retentionStart));
+  await withDatabaseRetry('cleanupExpiredLoginAttempts', async () => {
+    await db
+      .delete(authLoginAttempts)
+      .where(lt(authLoginAttempts.createdAt, retentionStart));
+  });
+
+  lastLoginAttemptCleanupAt = now;
 }
 
 async function countRecentFailures(
@@ -72,12 +85,14 @@ async function countRecentFailures(
     whereConditions.push(eq(authLoginAttempts.ipAddress, conditions.ipAddress));
   }
 
-  const [result] = await db
-    .select({
-      count: sql<number>`count(*)`,
-    })
-    .from(authLoginAttempts)
-    .where(and(...whereConditions));
+  const [result] = await withDatabaseRetry('countRecentFailures', async () => (
+    db
+      .select({
+        count: sql<number>`count(*)`,
+      })
+      .from(authLoginAttempts)
+      .where(and(...whereConditions))
+  ));
 
   return result?.count ?? 0;
 }
@@ -115,10 +130,12 @@ export async function recordLoginAttempt(
 ) {
   await cleanupExpiredLoginAttempts();
 
-  await db.insert(authLoginAttempts).values({
-    scope,
-    identifier: normalizeIdentifier(input.identifier),
-    ipAddress: input.ipAddress ?? null,
-    wasSuccessful: input.wasSuccessful,
+  await withDatabaseRetry('recordLoginAttempt', async () => {
+    await db.insert(authLoginAttempts).values({
+      scope,
+      identifier: normalizeIdentifier(input.identifier),
+      ipAddress: input.ipAddress ?? null,
+      wasSuccessful: input.wasSuccessful,
+    });
   });
 }

@@ -1,17 +1,45 @@
 import { and, eq } from 'drizzle-orm';
 import { NextResponse } from 'next/server';
+import { z } from 'zod';
 
-import { db, ensureDatabaseReady } from '@/db/client';
+import { db, withDatabaseRetry } from '@/db/client';
 import { attempts } from '@/db/schema';
+import { getTrustedRequestIp, isTrustedSameOriginRequest } from '@/lib/auth/request-security';
 import { getCurrentStudent } from '@/lib/auth/session';
 import { getAttemptDetail } from '@/lib/data/queries';
 import { calculateTypingMetrics, normalizeTypingText } from '@/modules/typing-engine';
+
+const MAX_SUBMIT_PAYLOAD_BYTES = 64 * 1024;
+const submitAttemptSchema = z.object({
+  typedTextRaw: z.string().default(''),
+  backspaceCount: z.number().int().min(0).max(100_000).default(0),
+  clientMeta: z.object({
+    language: z.string().trim().min(1).max(32).optional(),
+    source: z.string().trim().min(1).max(64).optional(),
+    viewport: z.object({
+      width: z.number().int().min(0).max(20_000),
+      height: z.number().int().min(0).max(20_000),
+    }).optional(),
+  }).strict().default({}),
+});
 
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ attemptId: string }> },
 ) {
-  await ensureDatabaseReady();
+  if (!isTrustedSameOriginRequest({
+    host: request.headers.get('host'),
+    forwardedHost: request.headers.get('x-forwarded-host'),
+    origin: request.headers.get('origin'),
+    referer: request.headers.get('referer'),
+  })) {
+    return NextResponse.json({ error: 'forbidden_origin' }, { status: 403 });
+  }
+
+  const contentLength = Number(request.headers.get('content-length') ?? '0');
+  if (Number.isFinite(contentLength) && contentLength > MAX_SUBMIT_PAYLOAD_BYTES) {
+    return NextResponse.json({ error: '提交内容过大。' }, { status: 413 });
+  }
 
   const currentStudent = await getCurrentStudent();
 
@@ -31,17 +59,25 @@ export async function POST(
     return NextResponse.json({ redirectTo: `/result/${id}` });
   }
 
-  const payload = (await request.json()) as {
-    typedTextRaw?: string;
-    durationSecondsUsed?: number;
-    backspaceCount?: number;
-    clientMeta?: Record<string, unknown>;
-  };
+  const payloadJson = await request.json().catch(() => null);
+  const parsedPayload = submitAttemptSchema.safeParse(payloadJson);
+
+  if (!parsedPayload.success) {
+    return NextResponse.json({ error: '提交内容无效。' }, { status: 400 });
+  }
+
+  const maxTypedTextLength = Math.min(
+    50_000,
+    Math.max((attempt.articleContent?.length ?? 0) * 4, 4_000),
+  );
+  if (parsedPayload.data.typedTextRaw.length > maxTypedTextLength) {
+    return NextResponse.json({ error: '提交内容过长。' }, { status: 400 });
+  }
 
   const submittedAt = new Date();
   const serverElapsedSeconds = Math.max(1, Math.floor((submittedAt.getTime() - attempt.startedAt.getTime()) / 1000));
   const durationSecondsUsed = Math.min(attempt.durationSecondsAllocated, serverElapsedSeconds);
-  const typedTextRaw = payload.typedTextRaw ?? '';
+  const typedTextRaw = parsedPayload.data.typedTextRaw;
   const typedTextNormalized = normalizeTypingText(typedTextRaw);
   const metrics = calculateTypingMetrics({
     referenceText: attempt.articleContent ?? '',
@@ -52,27 +88,36 @@ export async function POST(
   const suspicionFlags: string[] = [];
   if (metrics.scoreKpm > 900) suspicionFlags.push('score_unusually_high');
   if (durationSecondsUsed < 10 && metrics.charCountTyped > 20) suspicionFlags.push('submitted_too_fast');
+  if (typedTextRaw.length > (attempt.articleContent?.length ?? 0) * 2 && typedTextRaw.length > 4_000) {
+    suspicionFlags.push('typed_text_unusually_long');
+  }
 
-  const updateResult = await db.update(attempts).set({
-    status: 'submitted',
-    submittedAt,
-    durationSecondsUsed,
-    typedTextRaw,
-    typedTextNormalized,
-    charCountTyped: metrics.charCountTyped,
-    charCountCorrect: metrics.charCountCorrect,
-    charCountError: metrics.charCountError,
-    backspaceCount: payload.backspaceCount ?? 0,
-    clientMeta: payload.clientMeta ?? {},
-    suspicionFlags,
-    scoreKpm: metrics.scoreKpm,
-    accuracy: metrics.accuracy,
-    scoreVersion: 'v2',
-    updatedAt: new Date(),
-  }).where(and(
-    eq(attempts.id, id),
-    eq(attempts.studentId, currentStudent.student.id),
-    eq(attempts.status, 'started'),
+  const requestUserAgent = request.headers.get('user-agent');
+  const requestIp = getTrustedRequestIp(request.headers);
+  const updateResult = await withDatabaseRetry('submitAttempt.updateAttempt', async () => (
+    db.update(attempts).set({
+      status: 'submitted',
+      submittedAt,
+      durationSecondsUsed,
+      typedTextRaw,
+      typedTextNormalized,
+      charCountTyped: metrics.charCountTyped,
+      charCountCorrect: metrics.charCountCorrect,
+      charCountError: metrics.charCountError,
+      backspaceCount: parsedPayload.data.backspaceCount,
+      clientMeta: parsedPayload.data.clientMeta,
+      suspicionFlags,
+      scoreKpm: metrics.scoreKpm,
+      accuracy: metrics.accuracy,
+      scoreVersion: 'v2',
+      ipAddress: requestIp,
+      userAgent: requestUserAgent,
+      updatedAt: new Date(),
+    }).where(and(
+      eq(attempts.id, id),
+      eq(attempts.studentId, currentStudent.student.id),
+      eq(attempts.status, 'started'),
+    ))
   ));
 
   if (updateResult.rowsAffected === 0) {

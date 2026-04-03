@@ -5,6 +5,11 @@ import { eq } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { adminUsers } from '@/db/schema';
 import { hashPassword } from '@/lib/auth/password';
+import { PASSWORD_MIN_LENGTH } from '@/lib/env';
+
+function normalizeAdminUsername(username: string) {
+  return username.trim().toLowerCase();
+}
 
 async function main() {
   console.log('🚀 创建管理员账号\n');
@@ -37,7 +42,7 @@ async function main() {
       message: '请输入密码:',
       mask: '*',
       validate: (value) => {
-        if (value.length < 6) return '密码至少需要 6 个字符';
+        if (value.length < PASSWORD_MIN_LENGTH) return `密码至少需要 ${PASSWORD_MIN_LENGTH} 个字符`;
         return true;
       },
     });
@@ -51,6 +56,8 @@ async function main() {
       console.error('❌ 两次输入的密码不一致');
       process.exit(1);
     }
+
+    const normalizedUsername = normalizeAdminUsername(username);
 
     const role = await input({
       message: '请选择角色 (admin/teacher):',
@@ -67,7 +74,7 @@ async function main() {
     const existing = await db
       .select({ id: adminUsers.id, username: adminUsers.username })
       .from(adminUsers)
-      .where(eq(adminUsers.username, username))
+      .where(eq(adminUsers.username, normalizedUsername))
       .get();
 
     if (existing) {
@@ -91,24 +98,24 @@ async function main() {
           status: 'active',
           updatedAt: new Date(),
         })
-        .where(eq(adminUsers.username, username));
+        .where(eq(adminUsers.username, normalizedUsername));
 
-      console.log(`\n✅ 管理员 "${username}" 已更新`);
+      console.log(`\n✅ 管理员 "${normalizedUsername}" 已更新`);
     } else {
       // 创建新管理员
       await db.insert(adminUsers).values({
-        username: username.trim(),
+        username: normalizedUsername,
         passwordHash: hashPassword(plainPassword),
         displayName: displayName.trim(),
         role,
         status: 'active',
       });
 
-      console.log(`\n✅ 管理员 "${username}" 创建成功`);
+      console.log(`\n✅ 管理员 "${normalizedUsername}" 创建成功`);
     }
 
     console.log('\n管理员信息:');
-    console.log(`  用户名: ${username}`);
+    console.log(`  用户名: ${normalizedUsername}`);
     console.log(`  显示名: ${displayName}`);
     console.log(`  角色: ${role}`);
 

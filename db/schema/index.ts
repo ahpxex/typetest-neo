@@ -74,6 +74,7 @@ export const studentEmailVerificationTokens = sqliteTable(
     uniqueIndex('student_email_verification_tokens_token_hash_unique').on(table.tokenHash),
     index('student_email_verification_tokens_student_idx').on(table.studentId),
     index('student_email_verification_tokens_expires_at_idx').on(table.expiresAt),
+    index('student_email_verification_tokens_request_ip_created_at_idx').on(table.requestIp, table.createdAt),
   ],
 );
 
@@ -100,6 +101,7 @@ export const authLoginAttempts = sqliteTable(
       table.ipAddress,
       table.createdAt,
     ),
+    index('auth_login_attempts_created_at_idx').on(table.createdAt),
   ],
 );
 
@@ -195,6 +197,34 @@ export const attempts = sqliteTable(
     index('attempts_mode_idx').on(table.mode),
     index('attempts_status_idx').on(table.status),
     index('attempts_submitted_at_idx').on(table.submittedAt),
+    index('attempts_created_at_idx').on(table.createdAt),
+    index('attempts_student_started_lookup_idx').on(
+      table.studentId,
+      table.mode,
+      table.status,
+      table.createdAt,
+      table.attemptNo,
+    ),
+    index('attempts_student_started_article_lookup_idx').on(
+      table.studentId,
+      table.mode,
+      table.status,
+      table.articleId,
+      table.createdAt,
+      table.attemptNo,
+    ),
+    index('attempts_student_snapshot_lookup_idx').on(
+      table.studentNoSnapshot,
+      table.attemptNo,
+      table.createdAt,
+    ),
+    index('attempts_leaderboard_idx').on(
+      table.mode,
+      table.status,
+      sql`${table.scoreKpm} desc`,
+      sql`${table.accuracy} desc`,
+      table.submittedAt,
+    ),
     check('attempts_duration_seconds_allocated_positive_check', sql`${table.durationSecondsAllocated} > 0`),
     check('attempts_attempt_no_positive_check', sql`${table.attemptNo} > 0`),
   ],

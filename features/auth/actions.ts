@@ -5,12 +5,13 @@ import { redirect } from 'next/navigation';
 import { headers } from 'next/headers';
 import { z } from 'zod';
 
-import { db } from '@/db/client';
-import { studentEmailVerificationTokens, students } from '@/db/schema';
+import { db, withDatabaseRetry } from '@/db/client';
+import { adminUsers, studentEmailVerificationTokens, students } from '@/db/schema';
 import { clearSession, createSession } from '@/lib/auth/session';
 import { createEmailVerificationToken, hashEmailVerificationToken } from '@/lib/auth/email-verification';
 import { checkLoginRateLimit, recordLoginAttempt } from '@/lib/auth/login-rate-limit';
 import { hashPassword, verifyPassword } from '@/lib/auth/password';
+import { getTrustedRequestIp } from '@/lib/auth/request-security';
 import { getAdminByUsername } from '@/lib/data/queries';
 import {
   DEV_ADMIN_USERNAME,
@@ -71,12 +72,15 @@ function normalizeCampusEmail(campusEmail: string) {
   return campusEmail.trim().toLowerCase();
 }
 
+function normalizeAdminUsername(username: string) {
+  return username.trim().toLowerCase();
+}
+
 async function getRequestClientInfo() {
   const requestHeaders = await headers();
-  const forwardedFor = requestHeaders.get('x-forwarded-for');
 
   return {
-    requestIp: forwardedFor?.split(',')[0]?.trim() ?? requestHeaders.get('x-real-ip'),
+    requestIp: getTrustedRequestIp(requestHeaders),
     requestUserAgent: requestHeaders.get('user-agent'),
   };
 }
@@ -89,27 +93,31 @@ function redirectWithNotice(path: string, key: 'success' | 'error', message: str
 
 async function getStudentByCampusEmail(campusEmail: string) {
   const normalizedCampusEmail = normalizeCampusEmail(campusEmail);
-  const [student] = await db
-    .select()
-    .from(students)
-    .where(sql<boolean>`lower(${students.campusEmail}) = ${normalizedCampusEmail}`)
-    .limit(1);
+  const [student] = await withDatabaseRetry('getStudentByCampusEmail', async () => (
+    db
+      .select()
+      .from(students)
+      .where(eq(students.campusEmail, normalizedCampusEmail))
+      .limit(1)
+  ));
 
   return student ?? null;
 }
 
 async function getStudentForRegistration(studentNo: string, campusEmail: string) {
   const normalizedCampusEmail = normalizeCampusEmail(campusEmail);
-  const [student] = await db
-    .select()
-    .from(students)
-    .where(
-      or(
-        eq(students.studentNo, studentNo),
-        sql<boolean>`lower(${students.campusEmail}) = ${normalizedCampusEmail}`,
-      ),
-    )
-    .limit(1);
+  const [student] = await withDatabaseRetry('getStudentForRegistration', async () => (
+    db
+      .select()
+      .from(students)
+      .where(
+        or(
+          eq(students.studentNo, studentNo),
+          eq(students.campusEmail, normalizedCampusEmail),
+        ),
+      )
+      .limit(1)
+  ));
 
   return student ?? null;
 }
@@ -167,13 +175,15 @@ export async function studentLoginAction(
     return { error: '请先查收确认邮件并完成邮箱验证。' };
   }
 
-  await db
-    .update(students)
-    .set({
-      lastLoginAt: new Date(),
-      updatedAt: new Date(),
-    })
-    .where(eq(students.id, student.id));
+  await withDatabaseRetry('studentLoginAction.updateLastLoginAt', async () => {
+    await db
+      .update(students)
+      .set({
+        lastLoginAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(eq(students.id, student.id));
+  });
 
   await clearSession('student');
   await createSession('student', student.id);
@@ -231,9 +241,26 @@ export async function studentRegisterAction(
   const nextPasswordHash = hashPassword(parsed.data.password);
 
   if (existingStudent) {
-    await db
-      .update(students)
-      .set({
+    await withDatabaseRetry('studentRegisterAction.updateStudent', async () => {
+      await db
+        .update(students)
+        .set({
+          name: parsed.data.name.trim(),
+          campusEmail,
+          enrollmentYear: parsedIdentity.enrollmentYear,
+          schoolCode: parsedIdentity.schoolCode,
+          majorCode: parsedIdentity.majorCode,
+          classSerial: parsedIdentity.classSerial,
+          passwordHash: nextPasswordHash,
+          emailVerifiedAt: null,
+          updatedAt: now,
+        })
+        .where(eq(students.id, existingStudent.id));
+    });
+  } else {
+    await withDatabaseRetry('studentRegisterAction.insertStudent', async () => {
+      await db.insert(students).values({
+        studentNo: parsedIdentity.studentNo,
         name: parsed.data.name.trim(),
         campusEmail,
         enrollmentYear: parsedIdentity.enrollmentYear,
@@ -241,47 +268,38 @@ export async function studentRegisterAction(
         majorCode: parsedIdentity.majorCode,
         classSerial: parsedIdentity.classSerial,
         passwordHash: nextPasswordHash,
+        status: 'active',
         emailVerifiedAt: null,
-        updatedAt: now,
-      })
-      .where(eq(students.id, existingStudent.id));
-  } else {
-    await db.insert(students).values({
-      studentNo: parsedIdentity.studentNo,
-      name: parsed.data.name.trim(),
-      campusEmail,
-      enrollmentYear: parsedIdentity.enrollmentYear,
-      schoolCode: parsedIdentity.schoolCode,
-      majorCode: parsedIdentity.majorCode,
-      classSerial: parsedIdentity.classSerial,
-      passwordHash: nextPasswordHash,
-      status: 'active',
-      emailVerifiedAt: null,
-      lastLoginAt: null,
+        lastLoginAt: null,
+      });
     });
   }
 
-  const [currentStudent] = await db
-    .select()
-    .from(students)
-    .where(eq(students.studentNo, parsedIdentity.studentNo))
-    .limit(1);
+  const [currentStudent] = await withDatabaseRetry('studentRegisterAction.getCurrentStudent', async () => (
+    db
+      .select()
+      .from(students)
+      .where(eq(students.studentNo, parsedIdentity.studentNo))
+      .limit(1)
+  ));
 
   if (!currentStudent) {
     return { error: '注册失败，请稍后重试。' };
   }
 
-  const [latestToken] = await db
-    .select()
-    .from(studentEmailVerificationTokens)
-    .where(
-      and(
-        eq(studentEmailVerificationTokens.studentId, currentStudent.id),
-        isNull(studentEmailVerificationTokens.consumedAt),
-      ),
-    )
-    .orderBy(desc(studentEmailVerificationTokens.createdAt))
-    .limit(1);
+  const [latestToken] = await withDatabaseRetry('studentRegisterAction.getLatestVerificationToken', async () => (
+    db
+      .select()
+      .from(studentEmailVerificationTokens)
+      .where(
+        and(
+          eq(studentEmailVerificationTokens.studentId, currentStudent.id),
+          isNull(studentEmailVerificationTokens.consumedAt),
+        ),
+      )
+      .orderBy(desc(studentEmailVerificationTokens.createdAt))
+      .limit(1)
+  ));
 
   if (latestToken) {
     const elapsedSeconds = Math.floor((Date.now() - latestToken.createdAt.getTime()) / 1000);
@@ -299,17 +317,19 @@ export async function studentRegisterAction(
 
   if (requestIp) {
     const ipWindowStart = new Date(Date.now() - EMAIL_VERIFICATION_IP_WINDOW_MINUTES * 60 * 1000);
-    const [ipRecentRequestCount] = await db
-      .select({
-        count: sql<number>`count(*)`,
-      })
-      .from(studentEmailVerificationTokens)
-      .where(
-        and(
-          eq(studentEmailVerificationTokens.requestIp, requestIp),
-          sql<boolean>`${studentEmailVerificationTokens.createdAt} >= ${ipWindowStart}`,
-        ),
-      );
+    const [ipRecentRequestCount] = await withDatabaseRetry('studentRegisterAction.countRecentVerificationRequestsByIp', async () => (
+      db
+        .select({
+          count: sql<number>`count(*)`,
+        })
+        .from(studentEmailVerificationTokens)
+        .where(
+          and(
+            eq(studentEmailVerificationTokens.requestIp, requestIp),
+            sql<boolean>`${studentEmailVerificationTokens.createdAt} >= ${ipWindowStart}`,
+          ),
+        )
+    ));
 
     if ((ipRecentRequestCount?.count ?? 0) >= EMAIL_VERIFICATION_IP_WINDOW_MAX_REQUESTS) {
       return {
@@ -318,22 +338,24 @@ export async function studentRegisterAction(
     }
   }
 
-  await db
-    .update(studentEmailVerificationTokens)
-    .set({ consumedAt: now })
-    .where(
-      and(
-        eq(studentEmailVerificationTokens.studentId, currentStudent.id),
-        isNull(studentEmailVerificationTokens.consumedAt),
-      ),
-    );
+  await withDatabaseRetry('studentRegisterAction.rotateVerificationTokens', async () => {
+    await db
+      .update(studentEmailVerificationTokens)
+      .set({ consumedAt: now })
+      .where(
+        and(
+          eq(studentEmailVerificationTokens.studentId, currentStudent.id),
+          isNull(studentEmailVerificationTokens.consumedAt),
+        ),
+      );
 
-  await db.insert(studentEmailVerificationTokens).values({
-    studentId: currentStudent.id,
-    tokenHash,
-    expiresAt,
-    requestIp,
-    requestUserAgent,
+    await db.insert(studentEmailVerificationTokens).values({
+      studentId: currentStudent.id,
+      tokenHash,
+      expiresAt,
+      requestIp,
+      requestUserAgent,
+    });
   });
 
   const appBaseUrl = await getAppBaseUrl();
@@ -350,9 +372,11 @@ export async function studentRegisterAction(
   } catch (error) {
     console.error('[auth] Failed to send student verification email', error);
 
-    await db
-      .delete(studentEmailVerificationTokens)
-      .where(eq(studentEmailVerificationTokens.tokenHash, tokenHash));
+    await withDatabaseRetry('studentRegisterAction.rollbackVerificationToken', async () => {
+      await db
+        .delete(studentEmailVerificationTokens)
+        .where(eq(studentEmailVerificationTokens.tokenHash, tokenHash));
+    });
 
     return { error: '确认邮件发送失败，请稍后重试。' };
   }
@@ -372,21 +396,25 @@ export async function verifyStudentEmailAction(formData: FormData) {
   }
 
   const tokenHash = hashEmailVerificationToken(parsed.data.token);
-  const [tokenRecord] = await db
-    .select()
-    .from(studentEmailVerificationTokens)
-    .where(eq(studentEmailVerificationTokens.tokenHash, tokenHash))
-    .limit(1);
+  const [tokenRecord] = await withDatabaseRetry('verifyStudentEmailAction.getTokenRecord', async () => (
+    db
+      .select()
+      .from(studentEmailVerificationTokens)
+      .where(eq(studentEmailVerificationTokens.tokenHash, tokenHash))
+      .limit(1)
+  ));
 
   if (!tokenRecord) {
     redirectWithNotice('/verify-email', 'error', '确认链接无效或已失效。');
   }
 
-  const [student] = await db
-    .select()
-    .from(students)
-    .where(eq(students.id, tokenRecord.studentId))
-    .limit(1);
+  const [student] = await withDatabaseRetry('verifyStudentEmailAction.getStudent', async () => (
+    db
+      .select()
+      .from(students)
+      .where(eq(students.id, tokenRecord.studentId))
+      .limit(1)
+  ));
 
   if (!student) {
     redirectWithNotice('/verify-email', 'error', '对应学生账号不存在。');
@@ -410,23 +438,25 @@ export async function verifyStudentEmailAction(formData: FormData) {
 
   const verifiedAt = new Date();
 
-  await db
-    .update(students)
-    .set({
-      emailVerifiedAt: verifiedAt,
-      updatedAt: verifiedAt,
-    })
-    .where(eq(students.id, student.id));
+  await withDatabaseRetry('verifyStudentEmailAction.consumeVerificationToken', async () => {
+    await db
+      .update(students)
+      .set({
+        emailVerifiedAt: verifiedAt,
+        updatedAt: verifiedAt,
+      })
+      .where(eq(students.id, student.id));
 
-  await db
-    .update(studentEmailVerificationTokens)
-    .set({ consumedAt: verifiedAt })
-    .where(
-      and(
-        eq(studentEmailVerificationTokens.studentId, student.id),
-        isNull(studentEmailVerificationTokens.consumedAt),
-      ),
-    );
+    await db
+      .update(studentEmailVerificationTokens)
+      .set({ consumedAt: verifiedAt })
+      .where(
+        and(
+          eq(studentEmailVerificationTokens.studentId, student.id),
+          isNull(studentEmailVerificationTokens.consumedAt),
+        ),
+      );
+  });
 
   await clearSession('student');
   await createSession('student', student.id);
@@ -447,7 +477,7 @@ export async function adminLoginAction(
     return { error: parsed.error.issues[0]?.message ?? '管理员登录信息不完整' };
   }
 
-  const username = parsed.data.username.trim().toLowerCase();
+  const username = normalizeAdminUsername(parsed.data.username);
   const clientInfo = await getRequestClientInfo();
   const rateLimit = await checkLoginRateLimit('admin_login', {
     identifier: username,
@@ -458,7 +488,7 @@ export async function adminLoginAction(
     return { error: rateLimit.message ?? '登录尝试过于频繁，请稍后再试。' };
   }
 
-  const admin = await getAdminByUsername(parsed.data.username);
+  const admin = await getAdminByUsername(username);
 
   if (!admin || !verifyPassword(parsed.data.password, admin.passwordHash)) {
     await recordLoginAttempt('admin_login', {
@@ -468,6 +498,16 @@ export async function adminLoginAction(
     });
     return { error: '管理员账号或密码错误。' };
   }
+
+  await withDatabaseRetry('adminLoginAction.updateAdminLastLoginAt', async () => {
+    await db
+      .update(adminUsers)
+      .set({
+        lastLoginAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(eq(adminUsers.id, admin.id));
+  });
 
   await clearSession('admin');
   await createSession('admin', admin.id);

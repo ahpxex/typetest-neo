@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
 
+import { isTrustedSameOriginRequest } from '@/lib/auth/request-security'
 import { clearSession, refreshSession } from '@/lib/auth/session'
 
 const refreshSessionSchema = z.object({
@@ -8,6 +9,15 @@ const refreshSessionSchema = z.object({
 })
 
 export async function POST(request: Request) {
+  if (!isTrustedSameOriginRequest({
+    host: request.headers.get('host'),
+    forwardedHost: request.headers.get('x-forwarded-host'),
+    origin: request.headers.get('origin'),
+    referer: request.headers.get('referer'),
+  })) {
+    return NextResponse.json({ error: 'forbidden_origin' }, { status: 403 })
+  }
+
   const json = await request.json().catch(() => null)
   const parsed = refreshSessionSchema.safeParse(json)
 

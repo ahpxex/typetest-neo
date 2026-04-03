@@ -222,10 +222,8 @@ export function TypingTestClient({
         },
         body: JSON.stringify({
           typedTextRaw: typedTextRef.current,
-          durationSecondsUsed: elapsedSeconds,
           backspaceCount,
           clientMeta: {
-            userAgent: navigator.userAgent,
             language: navigator.language,
             viewport: {
               width: window.innerWidth,
@@ -250,7 +248,7 @@ export function TypingTestClient({
       setSubmitting(false);
       setError(submitError instanceof Error ? submitError.message : '成绩提交失败');
     }
-  }, [attemptId, backspaceCount, elapsedSeconds, router]);
+  }, [attemptId, backspaceCount, router]);
 
   useEffect(() => {
     if (!isDevelopment && remainingSeconds === 0 && !submitLockRef.current) {

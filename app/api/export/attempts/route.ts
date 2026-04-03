@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 
+import { canExportAttempts } from '@/lib/auth/admin-authorization';
 import { getCurrentAdmin } from '@/lib/auth/session';
 import { getExportRows } from '@/lib/data/queries';
 import { formatDateTime } from '@/lib/format';
@@ -17,6 +18,10 @@ export async function GET() {
 
   if (!currentAdmin) {
     return NextResponse.json({ error: '管理员未登录。' }, { status: 401 });
+  }
+
+  if (!canExportAttempts(currentAdmin.admin.role)) {
+    return NextResponse.json({ error: '当前账号没有导出权限。' }, { status: 403 });
   }
 
   const rows = await getExportRows();

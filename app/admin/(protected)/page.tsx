@@ -15,6 +15,8 @@ import {
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { StudentScoresDialog } from '@/components/admin/student-scores-dialog';
 import { updateStudentStatusAction } from '@/features/admin/actions';
+import { canExportAttempts, canManageStudents } from '@/lib/auth/admin-authorization';
+import { requireAdmin } from '@/lib/auth/guards';
 import { ADMIN_STUDENTS_PAGE_SIZE, getAdminStudentFilterOptions, getAdminStudentsPage } from '@/lib/data/queries';
 import { formatDateTime, formatKpm, formatPercent } from '@/lib/format';
 import { AppSearchParams, getSearchParamValue } from '@/lib/search-params';
@@ -75,6 +77,7 @@ function getPaginationItems(totalPages: number, currentPage: number) {
 }
 
 export default async function AdminPage({ searchParams }: { searchParams?: AppSearchParams }) {
+  const { admin } = await requireAdmin();
   const params = (await searchParams) ?? {};
   const success = getSearchParamValue(params.success);
   const error = getSearchParamValue(params.error);
@@ -100,6 +103,8 @@ export default async function AdminPage({ searchParams }: { searchParams?: AppSe
 
   const rangeStart = studentPage.total === 0 ? 0 : (studentPage.page - 1) * studentPage.pageSize + 1;
   const rangeEnd = Math.min(studentPage.total, studentPage.page * studentPage.pageSize);
+  const canExport = canExportAttempts(admin.role);
+  const canManage = canManageStudents(admin.role);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-hidden">
@@ -111,9 +116,15 @@ export default async function AdminPage({ searchParams }: { searchParams?: AppSe
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <Button asChild variant="outline">
-            <Link href="/api/export/attempts">导出 CSV</Link>
-          </Button>
+          {canExport ? (
+            <Button asChild variant="outline">
+              <Link href="/api/export/attempts">导出 CSV</Link>
+            </Button>
+          ) : (
+            <Button variant="outline" disabled title="当前角色仅允许查看后台数据">
+              导出 CSV
+            </Button>
+          )}
         </div>
       </header>
 
@@ -190,12 +201,14 @@ export default async function AdminPage({ searchParams }: { searchParams?: AppSe
                     <TableCell>
                       <div className="flex flex-wrap gap-2">
                         <StudentScoresDialog student={student} />
-                        <form action={updateStudentStatusAction} className="flex gap-2">
-                          <input type="hidden" name="redirectTo" value={redirectTo} />
-                          <input type="hidden" name="studentId" value={student.id} />
-                          <input type="hidden" name="status" value={student.status === 'active' ? 'inactive' : 'active'} />
-                          <Button type="submit" variant="outline" size="sm">设为{student.status === 'active' ? '停用' : '启用'}</Button>
-                        </form>
+                        {canManage ? (
+                          <form action={updateStudentStatusAction} className="flex gap-2">
+                            <input type="hidden" name="redirectTo" value={redirectTo} />
+                            <input type="hidden" name="studentId" value={student.id} />
+                            <input type="hidden" name="status" value={student.status === 'active' ? 'inactive' : 'active'} />
+                            <Button type="submit" variant="outline" size="sm">设为{student.status === 'active' ? '停用' : '启用'}</Button>
+                          </form>
+                        ) : null}
                       </div>
                     </TableCell>
                   </TableRow>

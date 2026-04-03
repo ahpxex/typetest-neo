@@ -3,13 +3,14 @@ import { createHash, randomBytes } from 'node:crypto';
 import { and, eq, gt } from 'drizzle-orm';
 import { cookies, headers } from 'next/headers';
 
-import { db, ensureDatabaseReady } from '@/db/client';
+import { db, withDatabaseRetry } from '@/db/client';
 import { adminUsers, sessions, students } from '@/db/schema';
 import {
   ADMIN_SESSION_COOKIE,
   APP_BASE_URL,
   SESSION_DURATION_DAYS,
   STUDENT_SESSION_COOKIE,
+  TRUST_PROXY_HEADERS,
   isDevelopment,
 } from '@/lib/env';
 import { inferSecureCookie } from '@/lib/auth/cookie-security';
@@ -42,10 +43,13 @@ async function shouldUseSecureCookies() {
   return inferSecureCookie({
     appBaseUrl: APP_BASE_URL,
     forwarded: headerStore.get('forwarded'),
+    forwardedHost: headerStore.get('x-forwarded-host'),
     forwardedProto: headerStore.get('x-forwarded-proto'),
+    host: headerStore.get('host'),
     isDevelopment,
     origin: headerStore.get('origin'),
     referer: headerStore.get('referer'),
+    trustProxyHeaders: TRUST_PROXY_HEADERS,
   });
 }
 
@@ -72,41 +76,6 @@ function isIgnorableSessionReadError(error: unknown) {
   return message.includes('no such table: sessions')
     || message.includes('no such table')
     || message.includes('unable to open database file');
-}
-
-function isRetryableDatabaseLockError(error: unknown) {
-  if (!(error instanceof Error)) {
-    return false;
-  }
-
-  const message = error.message.toLowerCase();
-  return message.includes('database is locked') || message.includes('database busy');
-}
-
-function sleep(ms: number) {
-  return new Promise((resolve) => {
-    setTimeout(resolve, ms);
-  });
-}
-
-async function withDatabaseRetry<T>(label: string, action: () => Promise<T>) {
-  const maxAttempts = 4;
-
-  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-    try {
-      await ensureDatabaseReady();
-      return await action();
-    } catch (error) {
-      if (!isRetryableDatabaseLockError(error) || attempt === maxAttempts) {
-        throw error;
-      }
-
-      console.warn(`[db] ${label} hit a database lock, retrying (${attempt}/${maxAttempts})`);
-      await sleep(attempt * 50);
-    }
-  }
-
-  throw new Error(`[db] ${label} exhausted retry attempts.`);
 }
 
 async function revokeSessionRecord(tokenHash: string) {

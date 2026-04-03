@@ -269,6 +269,8 @@ async function run() {
           headers: {
             'Content-Type': 'application/json',
             Cookie: `${cookieName}=${attempt.token}`,
+            Origin: baseUrl,
+            Referer: `${baseUrl}/typing/exam`,
           },
           body: JSON.stringify({
             typedTextRaw: attempt.contentRaw,

@@ -13,16 +13,22 @@ describe('inferSecureCookie', () => {
   it('honors an explicit https forwarded proto header', () => {
     expect(inferSecureCookie({
       appBaseUrl: 'http://10.27.64.9',
+      forwardedHost: '10.27.64.9',
       forwardedProto: 'https',
+      host: '10.27.64.9',
       isDevelopment: false,
+      trustProxyHeaders: true,
     })).toBe(true);
   });
 
   it('honors an explicit http forwarded proto header', () => {
     expect(inferSecureCookie({
       appBaseUrl: 'https://example.com',
+      forwardedHost: 'example.com',
       forwardedProto: 'http',
+      host: 'example.com',
       isDevelopment: false,
+      trustProxyHeaders: true,
     })).toBe(false);
   });
 
@@ -30,13 +36,27 @@ describe('inferSecureCookie', () => {
     expect(inferSecureCookie({
       appBaseUrl: 'http://10.27.64.9',
       forwarded: 'for=127.0.0.1;proto=https;host=example.com',
+      host: 'example.com',
       isDevelopment: false,
+      trustProxyHeaders: true,
     })).toBe(true);
+  });
+
+  it('ignores proxy headers unless explicitly trusted', () => {
+    expect(inferSecureCookie({
+      appBaseUrl: 'http://10.27.64.9',
+      forwardedHost: '10.27.64.9',
+      forwardedProto: 'https',
+      host: '10.27.64.9',
+      isDevelopment: false,
+      trustProxyHeaders: false,
+    })).toBe(false);
   });
 
   it('uses the current request origin when proxy headers are unavailable', () => {
     expect(inferSecureCookie({
       appBaseUrl: 'https://example.com',
+      host: '10.27.64.9',
       isDevelopment: false,
       origin: 'http://10.27.64.9',
       referer: 'http://10.27.64.9/admin/login',
