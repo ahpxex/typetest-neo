@@ -41,6 +41,9 @@ export function StudentPageShell({
                       <Link href="/typing">返回首页</Link>
                     </Button>
                     <Button asChild variant="outline" size="sm">
+                      <Link href="/competitions">竞赛</Link>
+                    </Button>
+                    <Button asChild variant="outline" size="sm">
                       <Link href="/ranking">查看排行榜</Link>
                     </Button>
                     <form action={logoutAction}>

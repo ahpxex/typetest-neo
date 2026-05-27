@@ -2,6 +2,7 @@ import { relations, sql } from 'drizzle-orm';
 import { check, index, integer, real, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
 
 import { attemptModeValues } from '@/lib/attempt-mode';
+import { competitionStatusValues } from '@/lib/competition';
 
 const articleLanguageValues = ['en', 'zh'] as const;
 const articleStatusValues = ['draft', 'published', 'archived'] as const;
@@ -148,6 +149,42 @@ export const articles = sqliteTable(
   ],
 );
 
+export const competitions = sqliteTable(
+  'competitions',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    title: text('title').notNull(),
+    slug: text('slug').notNull(),
+    description: text('description'),
+    articleId: integer('article_id')
+      .notNull()
+      .references(() => articles.id, { onDelete: 'restrict', onUpdate: 'cascade' }),
+    articleTitleSnapshot: text('article_title_snapshot').notNull(),
+    status: text('status', { enum: competitionStatusValues }).notNull().default('draft'),
+    durationSeconds: integer('duration_seconds').notNull(),
+    maxAttemptsPerStudent: integer('max_attempts_per_student').notNull().default(1),
+    startAt: integer('start_at', { mode: 'timestamp_ms' }),
+    endAt: integer('end_at', { mode: 'timestamp_ms' }),
+    createdByAdminId: integer('created_by_admin_id').references(() => adminUsers.id, {
+      onDelete: 'set null',
+      onUpdate: 'cascade',
+    }),
+    ...timestamps(),
+  },
+  (table) => [
+    uniqueIndex('competitions_slug_unique').on(table.slug),
+    index('competitions_status_idx').on(table.status),
+    index('competitions_status_window_idx').on(table.status, table.startAt, table.endAt),
+    index('competitions_article_idx').on(table.articleId),
+    check('competitions_duration_seconds_positive_check', sql`${table.durationSeconds} > 0`),
+    check('competitions_max_attempts_positive_check', sql`${table.maxAttemptsPerStudent} > 0`),
+    check(
+      'competitions_window_order_check',
+      sql`${table.startAt} is null or ${table.endAt} is null or ${table.endAt} > ${table.startAt}`,
+    ),
+  ],
+);
+
 export const attempts = sqliteTable(
   'attempts',
   {
@@ -158,6 +195,10 @@ export const attempts = sqliteTable(
     articleId: integer('article_id')
       .notNull()
       .references(() => articles.id, { onDelete: 'restrict', onUpdate: 'cascade' }),
+    competitionId: integer('competition_id').references(() => competitions.id, {
+      onDelete: 'set null',
+      onUpdate: 'cascade',
+    }),
     mode: text('mode', { enum: attemptModeValues }).notNull().default('exam'),
     attemptNo: integer('attempt_no').notNull().default(1),
     status: text('status', { enum: attemptStatusValues }).notNull().default('started'),
@@ -235,6 +276,14 @@ export const attempts = sqliteTable(
       sql`${table.accuracy} desc`,
       table.submittedAt,
     ),
+    index('attempts_competition_ranking_idx').on(
+      table.competitionId,
+      table.status,
+      sql`${table.scoreKpm} desc`,
+      sql`${table.accuracy} desc`,
+      table.submittedAt,
+    ),
+    index('attempts_competition_student_idx').on(table.competitionId, table.studentId),
     check('attempts_duration_seconds_allocated_positive_check', sql`${table.durationSecondsAllocated} > 0`),
     check('attempts_attempt_no_positive_check', sql`${table.attemptNo} > 0`),
   ],
@@ -276,6 +325,19 @@ export const studentsRelations = relations(students, ({ many }) => ({
 
 export const articlesRelations = relations(articles, ({ many }) => ({
   attempts: many(attempts),
+  competitions: many(competitions),
+}));
+
+export const competitionsRelations = relations(competitions, ({ one, many }) => ({
+  article: one(articles, {
+    fields: [competitions.articleId],
+    references: [articles.id],
+  }),
+  createdByAdmin: one(adminUsers, {
+    fields: [competitions.createdByAdminId],
+    references: [adminUsers.id],
+  }),
+  attempts: many(attempts),
 }));
 
 export const attemptsRelations = relations(attempts, ({ one }) => ({
@@ -286,6 +348,10 @@ export const attemptsRelations = relations(attempts, ({ one }) => ({
   article: one(articles, {
     fields: [attempts.articleId],
     references: [articles.id],
+  }),
+  competition: one(competitions, {
+    fields: [attempts.competitionId],
+    references: [competitions.id],
   }),
 }));
 
@@ -306,6 +372,8 @@ export type AdminUser = typeof adminUsers.$inferSelect;
 export type NewAdminUser = typeof adminUsers.$inferInsert;
 export type Article = typeof articles.$inferSelect;
 export type NewArticle = typeof articles.$inferInsert;
+export type Competition = typeof competitions.$inferSelect;
+export type NewCompetition = typeof competitions.$inferInsert;
 export type Attempt = typeof attempts.$inferSelect;
 export type NewAttempt = typeof attempts.$inferInsert;
 export type Session = typeof sessions.$inferSelect;

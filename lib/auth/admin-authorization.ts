@@ -11,3 +11,19 @@ export function canExportAttempts(role: AdminUser['role']) {
 export function canViewStudentAttempts(role: AdminUser['role']) {
   return role === 'admin' || role === 'teacher';
 }
+
+export function canManageCompetitions(role: AdminUser['role']) {
+  return role === 'admin';
+}
+
+export function canViewCompetitions(role: AdminUser['role']) {
+  return role === 'admin' || role === 'teacher';
+}
+
+export function canManageArticles(role: AdminUser['role']) {
+  return role === 'admin';
+}
+
+export function canViewArticles(role: AdminUser['role']) {
+  return role === 'admin' || role === 'teacher';
+}

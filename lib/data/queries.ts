@@ -1,9 +1,17 @@
-import { and, asc, count, desc, eq, inArray, like, or, sql } from 'drizzle-orm';
+import { and, asc, count, desc, eq, inArray, like, ne, or, sql } from 'drizzle-orm';
 
 import { db, ensureDatabaseReady, withDatabaseRetry } from '@/db/client';
-import { adminUsers, articles, attempts, students } from '@/db/schema';
+import { adminUsers, articles, attempts, competitions, students } from '@/db/schema';
 import { MAX_ATTEMPTS_PER_STUDENT, TEST_DURATION_SECONDS } from '@/lib/env';
 import type { AttemptMode } from '@/lib/attempt-mode';
+import {
+  getCompetitionPhase,
+  isCompetitionVisibleToStudents,
+  type CompetitionPhase,
+  type CompetitionStatus,
+} from '@/lib/competition';
+
+type AttemptStatus = 'started' | 'submitted' | 'expired' | 'cancelled' | 'invalidated';
 
 type StudentIdentityInput = {
   studentNo: string;
@@ -493,7 +501,10 @@ export async function getStudentDashboard(studentId: number): Promise<StudentDas
           submittedAt: attempts.submittedAt,
         })
         .from(attempts)
-        .where(eq(attempts.studentId, studentId))
+        .where(and(
+          eq(attempts.studentId, studentId),
+          inArray(attempts.mode, ['practice', 'exam']),
+        ))
         .orderBy(desc(attempts.createdAt), desc(attempts.attemptNo))
         .limit(12)
     )),
@@ -797,6 +808,9 @@ export async function getAttemptDetail(attemptId: number) {
       .select({
         attemptId: attempts.id,
         articleId: attempts.articleId,
+        competitionId: attempts.competitionId,
+        competitionTitle: competitions.title,
+        competitionSlug: competitions.slug,
         mode: attempts.mode,
         articleTitle: attempts.articleTitleSnapshot,
         studentId: attempts.studentId,
@@ -821,6 +835,7 @@ export async function getAttemptDetail(attemptId: number) {
       })
       .from(attempts)
       .leftJoin(articles, eq(articles.id, attempts.articleId))
+      .leftJoin(competitions, eq(competitions.id, attempts.competitionId))
       .where(eq(attempts.id, attemptId))
       .get()
   ));
@@ -914,4 +929,747 @@ export async function getExportRows() {
       .leftJoin(students, eq(students.id, attempts.studentId))
       .orderBy(desc(attempts.createdAt))
   ));
+}
+
+// ---------------------------------------------------------------------------
+// Article management (admin)
+// ---------------------------------------------------------------------------
+
+export type AdminArticleSummary = {
+  id: number;
+  title: string;
+  slug: string;
+  language: 'en' | 'zh';
+  status: 'draft' | 'published' | 'archived';
+  charCount: number;
+  wordCount: number;
+  difficultyLevel: number;
+  source: string | null;
+  attemptCount: number;
+  competitionCount: number;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+export async function getAdminArticles(): Promise<AdminArticleSummary[]> {
+  const [articleRows, attemptCountRows, competitionCountRows] = await Promise.all([
+    withDatabaseRetry('getAdminArticles.articles', async () => (
+      db
+        .select({
+          id: articles.id,
+          title: articles.title,
+          slug: articles.slug,
+          language: articles.language,
+          status: articles.status,
+          charCount: articles.charCount,
+          wordCount: articles.wordCount,
+          difficultyLevel: articles.difficultyLevel,
+          source: articles.source,
+          createdAt: articles.createdAt,
+          updatedAt: articles.updatedAt,
+        })
+        .from(articles)
+        .orderBy(desc(articles.updatedAt), asc(articles.title))
+    )),
+    withDatabaseRetry('getAdminArticles.attemptCounts', async () => (
+      db
+        .select({ articleId: attempts.articleId, total: sql<number>`cast(count(*) as int)`.as('total') })
+        .from(attempts)
+        .groupBy(attempts.articleId)
+    )),
+    withDatabaseRetry('getAdminArticles.competitionCounts', async () => (
+      db
+        .select({ articleId: competitions.articleId, total: sql<number>`cast(count(*) as int)`.as('total') })
+        .from(competitions)
+        .groupBy(competitions.articleId)
+    )),
+  ]);
+
+  const attemptCountByArticle = new Map(attemptCountRows.map((row) => [row.articleId, row.total ?? 0]));
+  const competitionCountByArticle = new Map(competitionCountRows.map((row) => [row.articleId, row.total ?? 0]));
+
+  return articleRows.map((article) => ({
+    ...article,
+    attemptCount: attemptCountByArticle.get(article.id) ?? 0,
+    competitionCount: competitionCountByArticle.get(article.id) ?? 0,
+  }));
+}
+
+export type CompetitionArticleOption = {
+  articleId: number;
+  title: string;
+  slug: string;
+  status: 'draft' | 'published' | 'archived';
+  language: 'en' | 'zh';
+  charCount: number;
+};
+
+export async function getArticleOptionsForCompetition(): Promise<CompetitionArticleOption[]> {
+  return withDatabaseRetry('getArticleOptionsForCompetition', async () => (
+    db
+      .select({
+        articleId: articles.id,
+        title: articles.title,
+        slug: articles.slug,
+        status: articles.status,
+        language: articles.language,
+        charCount: articles.charCount,
+      })
+      .from(articles)
+      .where(ne(articles.status, 'archived'))
+      .orderBy(asc(articles.status), asc(articles.title))
+  ));
+}
+
+// ---------------------------------------------------------------------------
+// Competitions (admin)
+// ---------------------------------------------------------------------------
+
+export type AdminCompetitionSummary = {
+  id: number;
+  title: string;
+  slug: string;
+  description: string | null;
+  status: CompetitionStatus;
+  phase: CompetitionPhase;
+  articleId: number;
+  articleTitle: string;
+  durationSeconds: number;
+  maxAttemptsPerStudent: number;
+  startAt: Date | null;
+  endAt: Date | null;
+  participantCount: number;
+  attemptCount: number;
+  bestScoreKpm: number | null;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+async function getCompetitionAttemptStats(competitionIds: number[]) {
+  if (competitionIds.length === 0) {
+    return new Map<number, { participantCount: number; attemptCount: number; bestScoreKpm: number | null }>();
+  }
+
+  const rows = await withDatabaseRetry('getCompetitionAttemptStats', async () => (
+    db
+      .select({
+        competitionId: attempts.competitionId,
+        attemptCount: sql<number>`cast(count(*) as int)`.as('attempt_count'),
+        participantCount: sql<number>`cast(count(distinct ${attempts.studentId}) as int)`.as('participant_count'),
+        bestScoreKpm: sql<number | null>`max(${attempts.scoreKpm})`.as('best_score_kpm'),
+      })
+      .from(attempts)
+      .where(and(inArray(attempts.competitionId, competitionIds), eq(attempts.status, 'submitted')))
+      .groupBy(attempts.competitionId)
+  ));
+
+  const stats = new Map<number, { participantCount: number; attemptCount: number; bestScoreKpm: number | null }>();
+  for (const row of rows) {
+    if (row.competitionId === null) {
+      continue;
+    }
+    stats.set(row.competitionId, {
+      participantCount: row.participantCount ?? 0,
+      attemptCount: row.attemptCount ?? 0,
+      bestScoreKpm: row.bestScoreKpm ?? null,
+    });
+  }
+  return stats;
+}
+
+export async function getAdminCompetitions(): Promise<AdminCompetitionSummary[]> {
+  const competitionRows = await withDatabaseRetry('getAdminCompetitions.competitions', async () => (
+    db
+      .select({
+        id: competitions.id,
+        title: competitions.title,
+        slug: competitions.slug,
+        description: competitions.description,
+        status: competitions.status,
+        articleId: competitions.articleId,
+        articleTitleSnapshot: competitions.articleTitleSnapshot,
+        articleCurrentTitle: articles.title,
+        durationSeconds: competitions.durationSeconds,
+        maxAttemptsPerStudent: competitions.maxAttemptsPerStudent,
+        startAt: competitions.startAt,
+        endAt: competitions.endAt,
+        createdAt: competitions.createdAt,
+        updatedAt: competitions.updatedAt,
+      })
+      .from(competitions)
+      .leftJoin(articles, eq(articles.id, competitions.articleId))
+      .orderBy(desc(competitions.createdAt))
+  ));
+
+  const stats = await getCompetitionAttemptStats(competitionRows.map((row) => row.id));
+  const now = new Date();
+
+  return competitionRows.map((row) => {
+    const competitionStats = stats.get(row.id);
+    return {
+      id: row.id,
+      title: row.title,
+      slug: row.slug,
+      description: row.description,
+      status: row.status,
+      phase: getCompetitionPhase({ status: row.status, startAt: row.startAt, endAt: row.endAt }, now),
+      articleId: row.articleId,
+      articleTitle: row.articleCurrentTitle ?? row.articleTitleSnapshot,
+      durationSeconds: row.durationSeconds,
+      maxAttemptsPerStudent: row.maxAttemptsPerStudent,
+      startAt: row.startAt,
+      endAt: row.endAt,
+      participantCount: competitionStats?.participantCount ?? 0,
+      attemptCount: competitionStats?.attemptCount ?? 0,
+      bestScoreKpm: competitionStats?.bestScoreKpm ?? null,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+    } satisfies AdminCompetitionSummary;
+  });
+}
+
+export async function getCompetitionForEditing(competitionId: number) {
+  return withDatabaseRetry('getCompetitionForEditing', async () => (
+    db.query.competitions.findFirst({ where: eq(competitions.id, competitionId) })
+  ));
+}
+
+// ---------------------------------------------------------------------------
+// Competition leaderboard (shared by student + admin views)
+// ---------------------------------------------------------------------------
+
+export async function getCompetitionLeaderboard(competitionId: number): Promise<LeaderboardEntry[]> {
+  const rankedCompetitionAttempts = db.$with('ranked_competition_attempts').as(
+    db
+      .select({
+        attemptId: attempts.id,
+        studentId: attempts.studentId,
+        studentNo: attempts.studentNoSnapshot,
+        studentName: attempts.studentNameSnapshot,
+        campusEmail: attempts.campusEmailSnapshot,
+        mode: attempts.mode,
+        scoreKpm: attempts.scoreKpm,
+        accuracy: attempts.accuracy,
+        submittedAt: attempts.submittedAt,
+        attemptNo: attempts.attemptNo,
+        studentRank: sql<number>`
+          row_number() over (
+            partition by ${attempts.studentId}
+            order by ${attempts.scoreKpm} desc, ${attempts.accuracy} desc, ${attempts.submittedAt} asc
+          )
+        `.as('student_rank'),
+      })
+      .from(attempts)
+      .where(and(eq(attempts.competitionId, competitionId), eq(attempts.status, 'submitted'))),
+  );
+
+  const rows = await withDatabaseRetry('getCompetitionLeaderboard', async () => (
+    db
+      .with(rankedCompetitionAttempts)
+      .select({
+        attemptId: rankedCompetitionAttempts.attemptId,
+        studentId: rankedCompetitionAttempts.studentId,
+        studentNo: rankedCompetitionAttempts.studentNo,
+        name: rankedCompetitionAttempts.studentName,
+        campusEmail: rankedCompetitionAttempts.campusEmail,
+        mode: rankedCompetitionAttempts.mode,
+        scoreKpm: rankedCompetitionAttempts.scoreKpm,
+        accuracy: rankedCompetitionAttempts.accuracy,
+        submittedAt: rankedCompetitionAttempts.submittedAt,
+        attemptNo: rankedCompetitionAttempts.attemptNo,
+      })
+      .from(rankedCompetitionAttempts)
+      .where(eq(rankedCompetitionAttempts.studentRank, 1))
+      .orderBy(
+        desc(rankedCompetitionAttempts.scoreKpm),
+        desc(rankedCompetitionAttempts.accuracy),
+        asc(rankedCompetitionAttempts.submittedAt),
+      )
+  ));
+
+  return rows
+    .sort((left, right) => {
+      if (right.scoreKpm !== left.scoreKpm) {
+        return right.scoreKpm - left.scoreKpm;
+      }
+      if (right.accuracy !== left.accuracy) {
+        return right.accuracy - left.accuracy;
+      }
+      return (left.submittedAt?.getTime() ?? 0) - (right.submittedAt?.getTime() ?? 0);
+    })
+    .map((entry, index) => ({ ...entry, rank: index + 1 }));
+}
+
+// ---------------------------------------------------------------------------
+// Competitions (student)
+// ---------------------------------------------------------------------------
+
+export type StudentCompetitionSummary = {
+  id: number;
+  title: string;
+  slug: string;
+  description: string | null;
+  status: CompetitionStatus;
+  phase: CompetitionPhase;
+  articleTitle: string;
+  durationSeconds: number;
+  maxAttemptsPerStudent: number;
+  startAt: Date | null;
+  endAt: Date | null;
+  participantCount: number;
+  yourAttemptCount: number;
+  yourBestScoreKpm: number | null;
+  yourBestAccuracy: number | null;
+  yourBestAttemptId: number | null;
+};
+
+const STUDENT_COMPETITION_PHASE_ORDER: Record<CompetitionPhase, number> = {
+  open: 0,
+  upcoming: 1,
+  ended: 2,
+  closed: 3,
+  hidden: 4,
+};
+
+type StudentCompetitionAttemptRow = {
+  competitionId: number | null;
+  attemptId: number;
+  status: AttemptStatus;
+  scoreKpm: number;
+  accuracy: number;
+  attemptNo: number;
+  startedAt: Date;
+  submittedAt: Date | null;
+};
+
+function summarizeStudentCompetitionAttempts(rows: StudentCompetitionAttemptRow[]) {
+  const byCompetition = new Map<number, {
+    attemptCount: number;
+    bestScoreKpm: number | null;
+    bestAccuracy: number | null;
+    bestAttemptId: number | null;
+  }>();
+
+  for (const row of rows) {
+    if (row.competitionId === null) {
+      continue;
+    }
+
+    const current = byCompetition.get(row.competitionId) ?? {
+      attemptCount: 0,
+      bestScoreKpm: null,
+      bestAccuracy: null,
+      bestAttemptId: null,
+    };
+
+    current.attemptCount += 1;
+
+    if (row.status === 'submitted') {
+      const isBetter = current.bestScoreKpm === null
+        || row.scoreKpm > current.bestScoreKpm
+        || (row.scoreKpm === current.bestScoreKpm && row.accuracy > (current.bestAccuracy ?? 0));
+
+      if (isBetter) {
+        current.bestScoreKpm = row.scoreKpm;
+        current.bestAccuracy = row.accuracy;
+        current.bestAttemptId = row.attemptId;
+      }
+    }
+
+    byCompetition.set(row.competitionId, current);
+  }
+
+  return byCompetition;
+}
+
+export async function getStudentCompetitions(studentId: number): Promise<StudentCompetitionSummary[]> {
+  const competitionRows = await withDatabaseRetry('getStudentCompetitions.competitions', async () => (
+    db
+      .select({
+        id: competitions.id,
+        title: competitions.title,
+        slug: competitions.slug,
+        description: competitions.description,
+        status: competitions.status,
+        articleTitleSnapshot: competitions.articleTitleSnapshot,
+        articleCurrentTitle: articles.title,
+        durationSeconds: competitions.durationSeconds,
+        maxAttemptsPerStudent: competitions.maxAttemptsPerStudent,
+        startAt: competitions.startAt,
+        endAt: competitions.endAt,
+      })
+      .from(competitions)
+      .leftJoin(articles, eq(articles.id, competitions.articleId))
+      .where(inArray(competitions.status, ['published', 'closed']))
+      .orderBy(desc(competitions.createdAt))
+  ));
+
+  if (competitionRows.length === 0) {
+    return [];
+  }
+
+  const competitionIds = competitionRows.map((row) => row.id);
+
+  const [stats, studentAttemptRows] = await Promise.all([
+    getCompetitionAttemptStats(competitionIds),
+    withDatabaseRetry('getStudentCompetitions.studentAttempts', async () => (
+      db
+        .select({
+          competitionId: attempts.competitionId,
+          attemptId: attempts.id,
+          status: attempts.status,
+          scoreKpm: attempts.scoreKpm,
+          accuracy: attempts.accuracy,
+          attemptNo: attempts.attemptNo,
+          startedAt: attempts.startedAt,
+          submittedAt: attempts.submittedAt,
+        })
+        .from(attempts)
+        .where(and(eq(attempts.studentId, studentId), inArray(attempts.competitionId, competitionIds)))
+    )),
+  ]);
+
+  const yourAttemptsByCompetition = summarizeStudentCompetitionAttempts(studentAttemptRows);
+  const now = new Date();
+
+  return competitionRows
+    .map((row) => {
+      const competitionStats = stats.get(row.id);
+      const yourAttempts = yourAttemptsByCompetition.get(row.id);
+
+      return {
+        id: row.id,
+        title: row.title,
+        slug: row.slug,
+        description: row.description,
+        status: row.status,
+        phase: getCompetitionPhase({ status: row.status, startAt: row.startAt, endAt: row.endAt }, now),
+        articleTitle: row.articleCurrentTitle ?? row.articleTitleSnapshot,
+        durationSeconds: row.durationSeconds,
+        maxAttemptsPerStudent: row.maxAttemptsPerStudent,
+        startAt: row.startAt,
+        endAt: row.endAt,
+        participantCount: competitionStats?.participantCount ?? 0,
+        yourAttemptCount: yourAttempts?.attemptCount ?? 0,
+        yourBestScoreKpm: yourAttempts?.bestScoreKpm ?? null,
+        yourBestAccuracy: yourAttempts?.bestAccuracy ?? null,
+        yourBestAttemptId: yourAttempts?.bestAttemptId ?? null,
+      } satisfies StudentCompetitionSummary;
+    })
+    .sort((left, right) => {
+      const orderDifference = STUDENT_COMPETITION_PHASE_ORDER[left.phase] - STUDENT_COMPETITION_PHASE_ORDER[right.phase];
+      if (orderDifference !== 0) {
+        return orderDifference;
+      }
+      return (right.startAt?.getTime() ?? 0) - (left.startAt?.getTime() ?? 0);
+    });
+}
+
+export type CompetitionStudentAttempt = {
+  attemptId: number;
+  attemptNo: number;
+  status: AttemptStatus;
+  scoreKpm: number;
+  accuracy: number;
+  startedAt: Date;
+  submittedAt: Date | null;
+};
+
+export type StudentCompetitionDetail = {
+  id: number;
+  title: string;
+  slug: string;
+  description: string | null;
+  status: CompetitionStatus;
+  phase: CompetitionPhase;
+  articleTitle: string;
+  durationSeconds: number;
+  maxAttemptsPerStudent: number;
+  startAt: Date | null;
+  endAt: Date | null;
+  participantCount: number;
+  leaderboard: LeaderboardEntry[];
+  yourAttempts: CompetitionStudentAttempt[];
+  yourAttemptCount: number;
+  yourBestScoreKpm: number | null;
+  yourBestAccuracy: number | null;
+  yourBestAttemptId: number | null;
+  yourRank: number | null;
+};
+
+export async function getStudentCompetitionDetail(
+  competitionId: number,
+  studentId: number,
+): Promise<StudentCompetitionDetail | null> {
+  const competition = await withDatabaseRetry('getStudentCompetitionDetail.competition', async () => (
+    db
+      .select({
+        id: competitions.id,
+        title: competitions.title,
+        slug: competitions.slug,
+        description: competitions.description,
+        status: competitions.status,
+        articleTitleSnapshot: competitions.articleTitleSnapshot,
+        articleCurrentTitle: articles.title,
+        durationSeconds: competitions.durationSeconds,
+        maxAttemptsPerStudent: competitions.maxAttemptsPerStudent,
+        startAt: competitions.startAt,
+        endAt: competitions.endAt,
+      })
+      .from(competitions)
+      .leftJoin(articles, eq(articles.id, competitions.articleId))
+      .where(eq(competitions.id, competitionId))
+      .get()
+  ));
+
+  if (!competition || !isCompetitionVisibleToStudents(competition.status)) {
+    return null;
+  }
+
+  const [leaderboard, yourAttemptRows] = await Promise.all([
+    getCompetitionLeaderboard(competitionId),
+    withDatabaseRetry('getStudentCompetitionDetail.yourAttempts', async () => (
+      db
+        .select({
+          attemptId: attempts.id,
+          attemptNo: attempts.attemptNo,
+          status: attempts.status,
+          scoreKpm: attempts.scoreKpm,
+          accuracy: attempts.accuracy,
+          startedAt: attempts.startedAt,
+          submittedAt: attempts.submittedAt,
+        })
+        .from(attempts)
+        .where(and(eq(attempts.studentId, studentId), eq(attempts.competitionId, competitionId)))
+        .orderBy(desc(attempts.attemptNo))
+    )),
+  ]);
+
+  const yourSummary = summarizeStudentCompetitionAttempts(
+    yourAttemptRows.map((row) => ({ ...row, competitionId })),
+  ).get(competitionId);
+
+  const yourRank = leaderboard.find((entry) => entry.studentId === studentId)?.rank ?? null;
+
+  return {
+    id: competition.id,
+    title: competition.title,
+    slug: competition.slug,
+    description: competition.description,
+    status: competition.status,
+    phase: getCompetitionPhase({
+      status: competition.status,
+      startAt: competition.startAt,
+      endAt: competition.endAt,
+    }),
+    articleTitle: competition.articleCurrentTitle ?? competition.articleTitleSnapshot,
+    durationSeconds: competition.durationSeconds,
+    maxAttemptsPerStudent: competition.maxAttemptsPerStudent,
+    startAt: competition.startAt,
+    endAt: competition.endAt,
+    participantCount: leaderboard.length,
+    leaderboard,
+    yourAttempts: yourAttemptRows,
+    yourAttemptCount: yourSummary?.attemptCount ?? 0,
+    yourBestScoreKpm: yourSummary?.bestScoreKpm ?? null,
+    yourBestAccuracy: yourSummary?.bestAccuracy ?? null,
+    yourBestAttemptId: yourSummary?.bestAttemptId ?? null,
+    yourRank,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Competition attempt allocation (student typing flow)
+// ---------------------------------------------------------------------------
+
+type CompetitionAttemptContext = {
+  id: number;
+  title: string;
+  slug: string;
+  durationSeconds: number;
+  maxAttemptsPerStudent: number;
+  status: CompetitionStatus;
+  phase: CompetitionPhase;
+};
+
+type CompetitionAttemptArticle = {
+  articleId: number;
+  title: string;
+  slug: string;
+  language: 'en' | 'zh';
+  status: 'draft' | 'published' | 'archived';
+  contentRaw: string;
+  source: string | null;
+};
+
+export type EnsureCompetitionAttemptResult =
+  | { state: 'missing-student' }
+  | { state: 'not-found' }
+  | { state: 'no-article' }
+  | { state: 'not-open'; phase: CompetitionPhase; competition: CompetitionAttemptContext }
+  | { state: 'locked'; competition: CompetitionAttemptContext; latestAttempt: typeof attempts.$inferSelect | undefined }
+  | {
+      state: 'ready';
+      competition: CompetitionAttemptContext;
+      article: CompetitionAttemptArticle;
+      attempt: typeof attempts.$inferSelect;
+    };
+
+export async function ensureCompetitionAttemptForStudent(
+  studentId: number,
+  competitionId: number,
+): Promise<EnsureCompetitionAttemptResult> {
+  await ensureDatabaseReady();
+
+  const [student, competitionRow] = await Promise.all([
+    withDatabaseRetry('ensureCompetitionAttempt.getStudent', async () => (
+      db.query.students.findFirst({ where: eq(students.id, studentId) })
+    )),
+    withDatabaseRetry('ensureCompetitionAttempt.getCompetition', async () => (
+      db.query.competitions.findFirst({ where: eq(competitions.id, competitionId) })
+    )),
+  ]);
+
+  if (!student) {
+    return { state: 'missing-student' };
+  }
+
+  if (!competitionRow || !isCompetitionVisibleToStudents(competitionRow.status)) {
+    return { state: 'not-found' };
+  }
+
+  const articleRow = await withDatabaseRetry('ensureCompetitionAttempt.getArticle', async () => (
+    db
+      .select({
+        articleId: articles.id,
+        title: articles.title,
+        slug: articles.slug,
+        language: articles.language,
+        status: articles.status,
+        contentRaw: articles.contentRaw,
+        source: articles.source,
+      })
+      .from(articles)
+      .where(eq(articles.id, competitionRow.articleId))
+      .get()
+  ));
+
+  if (!articleRow || articleRow.status === 'archived') {
+    return { state: 'no-article' };
+  }
+
+  const phase = getCompetitionPhase(competitionRow);
+  const competitionContext: CompetitionAttemptContext = {
+    id: competitionRow.id,
+    title: competitionRow.title,
+    slug: competitionRow.slug,
+    durationSeconds: competitionRow.durationSeconds,
+    maxAttemptsPerStudent: competitionRow.maxAttemptsPerStudent,
+    status: competitionRow.status,
+    phase,
+  };
+
+  const startedAttemptFilter = and(
+    eq(attempts.studentId, studentId),
+    eq(attempts.mode, 'competition'),
+    eq(attempts.competitionId, competitionId),
+    eq(attempts.status, 'started'),
+  );
+
+  for (let insertAttempt = 1; insertAttempt <= 3; insertAttempt += 1) {
+    try {
+      return await withDatabaseRetry('ensureCompetitionAttempt.transaction', async () => (
+        db.transaction(async (tx) => {
+          const existingStartedAttempt = await tx.query.attempts.findFirst({
+            where: startedAttemptFilter,
+            orderBy: [desc(attempts.createdAt), desc(attempts.attemptNo)],
+          });
+
+          // Resume an in-progress attempt regardless of the current phase so a
+          // student is never locked out of submitting a run they already began.
+          if (existingStartedAttempt) {
+            return {
+              state: 'ready' as const,
+              competition: competitionContext,
+              article: articleRow,
+              attempt: existingStartedAttempt,
+            };
+          }
+
+          if (phase !== 'open') {
+            return { state: 'not-open' as const, phase, competition: competitionContext };
+          }
+
+          const [maxAttemptRow, usedAttempts] = await Promise.all([
+            tx
+              .select({ maxAttemptNo: sql<number>`coalesce(max(${attempts.attemptNo}), 0)` })
+              .from(attempts)
+              .where(eq(attempts.studentId, studentId))
+              .get(),
+            tx
+              .select({ count: count() })
+              .from(attempts)
+              .where(and(eq(attempts.studentId, studentId), eq(attempts.competitionId, competitionId)))
+              .get(),
+          ]);
+
+          const usedAttemptCount = usedAttempts?.count ?? 0;
+          if (usedAttemptCount >= competitionRow.maxAttemptsPerStudent) {
+            const latestAttempt = await tx.query.attempts.findFirst({
+              where: and(eq(attempts.studentId, studentId), eq(attempts.competitionId, competitionId)),
+              orderBy: [desc(attempts.attemptNo), desc(attempts.createdAt)],
+            });
+
+            return {
+              state: 'locked' as const,
+              competition: competitionContext,
+              latestAttempt,
+            };
+          }
+
+          const attemptNo = (maxAttemptRow?.maxAttemptNo ?? 0) + 1;
+
+          await tx.insert(attempts).values({
+            studentId: student.id,
+            articleId: articleRow.articleId,
+            competitionId,
+            mode: 'competition',
+            attemptNo,
+            status: 'started',
+            studentNoSnapshot: student.studentNo,
+            studentNameSnapshot: student.name,
+            campusEmailSnapshot: student.campusEmail,
+            articleTitleSnapshot: articleRow.title,
+            durationSecondsAllocated: competitionRow.durationSeconds,
+            typedTextRaw: '',
+            typedTextNormalized: '',
+            suspicionFlags: [],
+            clientMeta: {},
+          });
+
+          const attempt = await tx.query.attempts.findFirst({
+            where: startedAttemptFilter,
+            orderBy: [desc(attempts.createdAt), desc(attempts.attemptNo)],
+          });
+
+          if (!attempt) {
+            throw new Error('Failed to create competition attempt.');
+          }
+
+          return {
+            state: 'ready' as const,
+            competition: competitionContext,
+            article: articleRow,
+            attempt,
+          };
+        })
+      ));
+    } catch (error) {
+      if (!isAttemptNumberConflict(error) || insertAttempt === 3) {
+        throw error;
+      }
+    }
+  }
+
+  throw new Error('Failed to allocate competition attempt number.');
 }

@@ -7,7 +7,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
 import { getAnySignedInUser } from '@/lib/auth/guards'
-import { getAttemptDetail, getLeaderboard } from '@/lib/data/queries'
+import { getAttemptDetail, getCompetitionLeaderboard, getLeaderboard } from '@/lib/data/queries'
 import { getAttemptModeLabel } from '@/lib/attempt-mode'
 import { formatDateTime, formatDurationSeconds, formatKpm, formatPercent } from '@/lib/format'
 
@@ -23,12 +23,26 @@ export default async function ResultPage({ params }: { params: Promise<{ attempt
     redirect('/typing')
   }
 
-  const leaderboard = await getLeaderboard()
+  const isCompetition = attempt.mode === 'competition' && attempt.competitionId !== null
   const overallRank = attempt.mode === 'exam'
-    ? leaderboard.find((entry) => entry.attemptId === attempt.attemptId)?.rank
+    ? (await getLeaderboard()).find((entry) => entry.attemptId === attempt.attemptId)?.rank
+    : undefined
+  const competitionRank = isCompetition
+    ? (await getCompetitionLeaderboard(attempt.competitionId as number)).find((entry) => entry.studentId === attempt.studentId)?.rank
     : undefined
   const modeLabel = getAttemptModeLabel(attempt.mode)
-  const retryHref = attempt.mode === 'practice' ? '/typing/practice' : '/typing/exam'
+  const retryHref = isCompetition
+    ? `/competitions/${attempt.competitionId}`
+    : attempt.mode === 'practice'
+      ? '/typing/practice'
+      : '/typing/exam'
+  const backHref = isCompetition ? '/competitions' : '/typing'
+  const rankMetricLabel = isCompetition ? '竞赛排名' : '总榜排名'
+  const rankMetricValue = isCompetition
+    ? (competitionRank ? `#${competitionRank}` : '未上榜')
+    : attempt.mode === 'exam'
+      ? (overallRank ? `#${overallRank}` : '未上榜')
+      : '练习不参与'
 
   return (
     <main className="flex min-h-screen items-center justify-center bg-background px-4 py-8 md:px-6">
@@ -43,14 +57,18 @@ export default async function ResultPage({ params }: { params: Promise<{ attempt
                 {attempt.status}
               </Badge>
             </div>
-            <CardDescription>{attempt.articleTitle}</CardDescription>
+            <CardDescription>
+              {isCompetition && attempt.competitionTitle
+                ? `${attempt.competitionTitle} · ${attempt.articleTitle}`
+                : attempt.articleTitle}
+            </CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">
             <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
               <Metric title="速度" value={formatKpm(attempt.scoreKpm)} />
               <Metric title="正确率" value={formatPercent(attempt.accuracy)} />
               <Metric title="用时" value={formatDurationSeconds(attempt.durationSecondsUsed ?? attempt.durationSecondsAllocated)} />
-              <Metric title="总榜排名" value={attempt.mode === 'exam' ? (overallRank ? `#${overallRank}` : '未上榜') : '练习不参与'} />
+              <Metric title={rankMetricLabel} value={rankMetricValue} />
             </div>
 
             <div className="grid gap-3 rounded-2xl border border-border bg-muted/30 p-4 text-sm text-muted-foreground md:grid-cols-2">
@@ -69,10 +87,10 @@ export default async function ResultPage({ params }: { params: Promise<{ attempt
           </CardContent>
           <CardFooter className="justify-center gap-3 border-t">
             <Button asChild variant="outline" className="min-w-32">
-              <Link href="/typing">返回首页</Link>
+              <Link href={backHref}>{isCompetition ? '返回竞赛' : '返回首页'}</Link>
             </Button>
             <Button asChild variant="default" className="min-w-32">
-              <Link href={retryHref}>再来一次</Link>
+              <Link href={retryHref}>{isCompetition ? '查看竞赛' : '再来一次'}</Link>
             </Button>
           </CardFooter>
         </Card>
